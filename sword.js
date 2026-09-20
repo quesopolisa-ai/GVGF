@@ -21,11 +21,11 @@ window.Sword = function(canvas, ctx, W, H){
   ];
 
   var ARMORS = [
-    {n:'NONE',        hp:100, dr:0,  color:'#666'},
-    {n:'LEATHER',     hp:120, dr:10, color:'#8d6e63'},
-    {n:'CHAINMAIL',   hp:150, dr:20, color:'#9e9e9e'},
-    {n:'PLATE',       hp:200, dr:35, color:'#cfd8dc'},
-    {n:'DRAGONSCALE', hp:260, dr:45, color:'#66bb6a'}
+    {n:'NONE',        hp:100, dr:0,  adodge:0.00, color:'#666'},
+    {n:'LEATHER',     hp:120, dr:10, adodge:0.05, color:'#8d6e63'},
+    {n:'CHAINMAIL',   hp:150, dr:20, adodge:0.10, color:'#9e9e9e'},
+    {n:'PLATE',       hp:200, dr:35, adodge:0.20, color:'#cfd8dc'},
+    {n:'DRAGONSCALE', hp:260, dr:45, adodge:0.40, color:'#66bb6a'}
   ];
 
   var SEL = 0, FIGHT = 1, OVER = 2;
@@ -45,7 +45,6 @@ window.Sword = function(canvas, ctx, W, H){
   var f1, f2, over = false, winner = 0;
   var texts = [], sparks = [];
 
-  // Horizontal reach from fighter center to blade tip
   function totalReach(sw){ return 28 + sw.reach; }
 
   function mkFighter(x, dir, sw, ar, df, col){
@@ -56,7 +55,6 @@ window.Sword = function(canvas, ctx, W, H){
       cd:0, swing:0, resolved:false,
       stun:0, flash:0, lthink:0, qjump:false, qdodge:0,
       hx: x + dir*22, hy: GROUND - BH + 30,
-      // Previous frame blade endpoints for swept collision
       pHx:0, pHy:0, pTx:0, pTy:0,
       tx:0, ty:0
     };
@@ -92,8 +90,6 @@ window.Sword = function(canvas, ctx, W, H){
     return { x: f.x + f.dir*6, y: (GROUND - f.y) - BH + 20 };
   }
 
-  // Pose the hand along a swing arc. swing goes 1 -> 0.
-  // Returns nothing; writes f.hx, f.hy.
   function poseHand(f, dt){
     var sh = shoulder(f);
     var tx, ty;
@@ -103,18 +99,14 @@ window.Sword = function(canvas, ctx, W, H){
       var ang;
 
       if(t < 0.2){
-        // Wind-up: hand up and back
         ang = -Math.PI * 0.55;
       } else if(t < 0.65){
-        // Strike: sweep from up through forward to down
         var u = (t - 0.2) / 0.45;
         ang = -Math.PI * 0.55 + u * Math.PI * 0.9;
       } else {
-        // Recover
         ang = Math.PI * 0.35;
       }
 
-      // Mirror angle for left-facing
       var worldAng = (f.dir > 0) ? ang : (Math.PI - ang);
 
       var armLen = 26 + f.sw.reach * 0.35;
@@ -130,7 +122,6 @@ window.Sword = function(canvas, ctx, W, H){
     f.hy += (ty - f.hy) * rate * dt;
   }
 
-  // Recompute blade tip from current hand position
   function updateTip(f){
     var sh = shoulder(f);
     var dx = f.hx - sh.x, dy = f.hy - sh.y;
@@ -139,7 +130,6 @@ window.Sword = function(canvas, ctx, W, H){
     f.ty = f.hy + (dy/len) * f.sw.reach;
   }
 
-  // Segment vs axis-aligned rect (Liang-Barsky clipping)
   function segRect(x1, y1, x2, y2, rx1, ry1, rx2, ry2){
     var dx = x2 - x1, dy = y2 - y1;
     var t0 = 0, t1 = 1;
@@ -157,7 +147,6 @@ window.Sword = function(canvas, ctx, W, H){
     return true;
   }
 
-  // Swept blade vs target body: interpolate blade pose over sub-frames
   function bladeHits(f, target){
     var bx1 = target.x - BW/2;
     var bx2 = target.x + BW/2;
@@ -176,7 +165,6 @@ window.Sword = function(canvas, ctx, W, H){
     return false;
   }
 
-  // Segment-segment intersection for sword clash
   function segSeg(x1,y1,x2,y2,x3,y3,x4,y4){
     var d = (x2-x1)*(y4-y3) - (y2-y1)*(x4-x3);
     if(Math.abs(d) < 0.0001) return null;
@@ -195,33 +183,37 @@ window.Sword = function(canvas, ctx, W, H){
     f.cd = f.sw.cd;
   }
 
+  // Combined dodge chance: difficulty dodge + armor dodge, as a probability union.
+  // P(A or B) = 1 - (1 - P(A)) * (1 - P(B))
+  function dodgeChance(f){
+    var d = f.df.dodge;
+    var a = f.ar.adodge;
+    return 1 - (1 - d) * (1 - a);
+  }
+
   function think(f, opp){
     var df = f.df;
     var dist = Math.abs(f.x - opp.x);
     var myReach = totalReach(f.sw);
     var oppReach = totalReach(opp.sw);
 
-    // Predict opponent position
     var predictX = opp.x + opp.vx * df.pred * 10;
     var aim = Math.abs(f.x - predictX);
 
-    // Dodge incoming swing
-    if(opp.swing > 0.4 && opp.swing < 0.95 && dist < oppReach + 10 && Math.random() < df.dodge){
+    // Dodge incoming swing — uses combined difficulty + armor dodge
+    if(opp.swing > 0.4 && opp.swing < 0.95 && dist < oppReach + 10 && Math.random() < dodgeChance(f)){
       f.qdodge = (f.x < opp.x) ? -1 : 1;
       if(Math.random() < df.jump) f.qjump = true;
       return;
     }
 
-    // Swing when in range
     if(aim < myReach - 10 && f.cd <= 0 && f.stun <= 0 && Math.random() < df.aggr){
       startSwing(f);
       return;
     }
 
-    // Occasional jump
     if(f.onGround && Math.random() < df.jump * 0.25 && dist > myReach) f.qjump = true;
 
-    // Approach / retreat — ideal distance is ~70% of total reach
     var ideal = myReach * 0.7;
     if(dist > ideal + 20)               f.vx += f.dir * df.spd * 0.4;
     else if(dist < ideal - 20 && Math.random() > df.aggr * 0.5)
@@ -247,17 +239,14 @@ window.Sword = function(canvas, ctx, W, H){
     if(f.x < 40)   { f.x = 40; f.vx = 0; }
     if(f.x > W-40) { f.x = W-40; f.vx = 0; }
 
-    // Save previous blade endpoints for sweep
     f.pHx = f.hx; f.pHy = f.hy; f.pTx = f.tx; f.pTy = f.ty;
 
-    // Advance swing
     if(f.swing > 0){
       var prevSwing = f.swing;
       f.swing = Math.max(0, f.swing - dt * 0.055);
       poseHand(f, dt);
       updateTip(f);
 
-      // Strike window — once per swing
       if(!f.resolved && prevSwing <= 0.9 && prevSwing >= 0.15){
         if(bladeHits(f, opp)){
           damage(opp, f.sw.dmg, f.x);
@@ -278,7 +267,6 @@ window.Sword = function(canvas, ctx, W, H){
     stepFighter(f1, f2, now, dt);
     stepFighter(f2, f1, now, dt);
 
-    // Sword clash: both mid-swing and blades crossing
     if(f1.swing > 0.25 && f2.swing > 0.25){
       var clash = segSeg(f1.hx, f1.hy, f1.tx, f1.ty, f2.hx, f2.hy, f2.tx, f2.ty);
       if(clash){
@@ -290,7 +278,6 @@ window.Sword = function(canvas, ctx, W, H){
       }
     }
 
-    // Body push-apart
     var gap = Math.abs(f1.x - f2.x);
     if(gap < BW + 4){
       var push = (BW + 4 - gap) / 2;
@@ -298,7 +285,6 @@ window.Sword = function(canvas, ctx, W, H){
       else           { f1.x += push; f2.x -= push; }
     }
 
-    // Face each other
     if(f1.x < f2.x){ f1.dir = 1; f2.dir = -1; }
     else           { f1.dir = -1; f2.dir = 1; }
 
@@ -327,7 +313,6 @@ window.Sword = function(canvas, ctx, W, H){
     ctx.fillStyle = f.col;
     ctx.fillRect(f.x + (f.dir > 0 ? 4 : -8), gy - BH - HR - 2, 4, 4);
 
-    // Arm with elbow
     var sh = shoulder(f);
     var dx = f.hx - sh.x, dy = f.hy - sh.y;
     var alen = Math.sqrt(dx*dx + dy*dy);
@@ -348,11 +333,9 @@ window.Sword = function(canvas, ctx, W, H){
     ctx.fillStyle = body;
     ctx.beginPath(); ctx.arc(f.hx, f.hy, 4, 0, Math.PI*2); ctx.fill();
 
-    // Blade
     ctx.strokeStyle = f.sw.color; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.moveTo(f.hx, f.hy); ctx.lineTo(f.tx, f.ty); ctx.stroke();
 
-    // Crossguard
     var gdx = f.tx - f.hx, gdy = f.ty - f.hy;
     var gl = Math.sqrt(gdx*gdx + gdy*gdy) || 1;
     ctx.strokeStyle = '#444'; ctx.lineWidth = 3;
@@ -361,7 +344,6 @@ window.Sword = function(canvas, ctx, W, H){
     ctx.lineTo(f.hx + (-gdy/gl*6), f.hy + (gdx/gl*6));
     ctx.stroke();
 
-    // HP bar
     var w = 80, bh2 = 7;
     var bx = f.x - w/2, by = gy - BH - HR - 30;
     ctx.fillStyle = '#222'; ctx.fillRect(bx, by, w, bh2);
@@ -445,6 +427,7 @@ window.Sword = function(canvas, ctx, W, H){
     var stage = STAGES[pickStage];
     var items = stage.items;
     var cur = selIdx[pickStage];
+    var isArmor = (stage.items === ARMORS);
 
     ctx.textAlign = 'center'; ctx.font = '22px monospace';
     ctx.fillStyle = stage.col;
@@ -455,11 +438,23 @@ window.Sword = function(canvas, ctx, W, H){
       var y = startY + i*lineH;
       if(i === cur){
         ctx.fillStyle = stage.col;
-        ctx.fillRect(W/2 - 260, y - 26, 520, 38);
+        ctx.fillRect(W/2 - 300, y - 26, 600, 38);
       }
       ctx.fillStyle = (i === cur) ? '#000' : '#ccc';
       ctx.font = '18px monospace'; ctx.textAlign = 'left';
-      ctx.fillText(items[i].n, W/2 - 240, y);
+      ctx.fillText(items[i].n, W/2 - 280, y);
+
+      // Right-side stats for armor
+      if(isArmor){
+        ctx.font = '12px monospace';
+        ctx.fillStyle = (i === cur) ? '#111' : '#666';
+        ctx.textAlign = 'right';
+        var stat = 'HP ' + items[i].hp +
+                   '   DR ' + items[i].dr + '%' +
+                   '   Dodge ' + Math.round(items[i].adodge * 100) + '%';
+        ctx.fillText(stat, W/2 + 280, y);
+        ctx.textAlign = 'left';
+      }
     }
 
     ctx.font = '12px monospace';
