@@ -3,22 +3,22 @@ window.Sword = function(canvas, ctx, W, H){
   var GRAV = 0.6, JUMP = -13;
   var BH = 90, BW = 22, HR = 11;
 
-  // Difficulty: crit chance scaled by tier. No dodge — that's armor/emblem only.
+  // Crit is always active (100% chance). critMult varies by tier.
   var DIFFS = [
-    {n:'EASY',    spd:2.7, react:400, pred:0.0,  jump:0.05, aggr:0.35, crit:0.10},
-    {n:'NORMAL',  spd:3.9, react:240, pred:0.25, jump:0.15, aggr:0.55, crit:0.20},
-    {n:'HARD',    spd:5.1, react:140, pred:0.55, jump:0.25, aggr:0.75, crit:0.40},
-    {n:'INSANE',  spd:6.3, react:80,  pred:0.80, jump:0.35, aggr:0.90, crit:0.55},
-    {n:'GODLIKE', spd:7.5, react:40,  pred:1.00, jump:0.45, aggr:1.00, crit:0.75}
+    {n:'EASY',    spd:2.7, react:400, pred:0.0,  jump:0.05, aggr:0.35, critMult:1.10},
+    {n:'NORMAL',  spd:3.9, react:240, pred:0.25, jump:0.15, aggr:0.55, critMult:1.20},
+    {n:'HARD',    spd:5.1, react:140, pred:0.55, jump:0.25, aggr:0.75, critMult:1.35},
+    {n:'INSANE',  spd:6.3, react:80,  pred:0.80, jump:0.35, aggr:0.90, critMult:1.50},
+    {n:'GODLIKE', spd:7.5, react:40,  pred:1.00, jump:0.45, aggr:1.00, critMult:2.50}
   ];
 
   var SWORDS = [
     {n:'DAGGER',      reach:60,  dmg:9,  cd:162, color:'#cfd8dc'},
     {n:'SHORT SWORD', reach:70,  dmg:15, cd:229, color:'#b0bec5'},
-    {n:'LONGSWORD',   reach:100,  dmg:18, cd:324, color:'#e0e0e0'},
+    {n:'LONGSWORD',   reach:100, dmg:18, cd:324, color:'#e0e0e0'},
     {n:'GREATSWORD',  reach:120, dmg:28, cd:448, color:'#ffd54f'},
     {n:'KATANA',      reach:95,  dmg:19, cd:248, color:'#80deea'},
-    {n:'RAPIER',      reach:102,  dmg:15, cd:191, color:'#f48fb1'}
+    {n:'RAPIER',      reach:102, dmg:15, cd:191, color:'#f48fb1'}
   ];
 
   var ARMORS = [
@@ -29,26 +29,17 @@ window.Sword = function(canvas, ctx, W, H){
     {n:'DRAGONSCALE', hp:260, dr:35, adodge:0.40, color:'#66bb6a'}
   ];
 
-  // Emblems modify HP, DR, dodge, damage output, and lifesteal.
-  // hpMult  — multiplies armor HP
-  // drMod   — added to armor DR (percent, can go negative)
-  // dodgeMod— added to armor dodge (fraction)
-  // dmgMult — multiplies outgoing sword damage
-  // steal   — fraction of damage dealt that heals self
   var EMBLEMS = [
-    {n:'NONE',     desc:'No modifiers',                    hpMult:1.0, drMod:0,   dodgeMod:0.00, dmgMult:1.0, steal:0.00},
-    {n:'ASSASSIN', desc:'+150% dmg, -40% HP',               hpMult:0.6, drMod:0,   dodgeMod:0.00, dmgMult:2.5, steal:0.00},
-    {n:'TANK',     desc:'+50% HP, +20% DR, -20% dmg',      hpMult:1.5, drMod:20,  dodgeMod:0.00, dmgMult:0.8, steal:0.00},
+    {n:'NONE',     desc:'No modifiers',                        hpMult:1.0, drMod:0,   dodgeMod:0.00, dmgMult:1.0, steal:0.00},
+    {n:'ASSASSIN', desc:'+150% dmg, -40% HP',                  hpMult:0.6, drMod:0,   dodgeMod:0.00, dmgMult:2.5, steal:0.00},
+    {n:'TANK',     desc:'+50% HP, +20% DR, -20% dmg',          hpMult:1.5, drMod:20,  dodgeMod:0.00, dmgMult:0.8, steal:0.00},
     {n:'FIGHTER',  desc:'+10% DR, +50% lifesteal, +10% dodge', hpMult:1.0, drMod:10,  dodgeMod:0.10, dmgMult:1.0, steal:0.50},
-    {n:'HEALER',   desc:'+100% HP, -20% DR, +5% dodge',   hpMult:2.0, drMod:-20, dodgeMod:0.05, dmgMult:1.0, steal:0.00}
+    {n:'HEALER',   desc:'+100% HP, -20% DR, +5% dodge',        hpMult:2.0, drMod:-20, dodgeMod:0.05, dmgMult:1.0, steal:0.00}
   ];
-
-  var CLASH_LOCKOUT_MS = 600;
 
   var SEL = 0, FIGHT = 1, OVER = 2;
   var st = SEL;
   var pickStage = 0;
-  // 8 stages per side: sword, armor, emblem, difficulty (x2)
   var selIdx = [1, 0, 0, 1, 1, 0, 0, 1];
 
   var STAGES = [
@@ -73,9 +64,8 @@ window.Sword = function(canvas, ctx, W, H){
     var em = EMBLEMS[emIdx];
     var df = DIFFS[dfIdx];
 
-    // Compute combined stats
     var maxHp  = Math.round(ar.hp * em.hpMult);
-    var dr     = ar.dr + em.drMod;                  // percent, can be negative
+    var dr     = ar.dr + em.drMod;
     var dodge  = Math.min(0.95, ar.adodge + em.dodgeMod);
 
     return {
@@ -87,7 +77,6 @@ window.Sword = function(canvas, ctx, W, H){
       steal: em.steal,
       cd:0, swing:0, resolved:false,
       stun:0, flash:0, lthink:0, qjump:false, qdodge:0,
-      clashCd: 0,
       hx: x + dir*22, hy: GROUND - BH + 30,
       pHx:0, pHy:0, pTx:0, pTy:0,
       tx:0, ty:0
@@ -108,14 +97,10 @@ window.Sword = function(canvas, ctx, W, H){
     }
   }
 
-  // Attacker deals damage to target. Rolls crit, applies dmg multiplier,
-  // applies target DR (can be negative = more damage taken), handles lifesteal.
+  // 100% crit — every hit uses the difficulty's crit multiplier.
   function damage(attacker, target){
-    var crit = Math.random() < attacker.df.crit;
-    var critMult = crit ? 1.5 : 1.0;
-    var raw = attacker.sw.dmg * attacker.dmgMult * critMult;
+    var raw = attacker.sw.dmg * attacker.dmgMult * attacker.df.critMult;
 
-    // DR can be negative (healer) — then damage is amplified
     var drFrac = target.dr / 100;
     var dmg = Math.max(1, Math.round(raw * (1 - drFrac)));
 
@@ -128,15 +113,12 @@ window.Sword = function(canvas, ctx, W, H){
       x: target.x,
       y: GROUND - BH - target.y - 30,
       vy: -0.9, life: 1,
-      text: (crit ? 'CRIT -' : '-') + dmg,
-      color: crit ? '#ffcc33' : '#ff5252',
-      big: crit
+      text: '-' + dmg,
+      color: '#ff5252'
     });
 
-    // Sparks — bigger burst on crit
-    spark(target.x, GROUND - BH/2 - target.y, crit ? '#ffcc33' : '#fff', crit ? 20 : 12);
+    spark(target.x, GROUND - BH/2 - target.y, '#fff', 12);
 
-    // Lifesteal
     if(attacker.steal > 0){
       var heal = Math.max(1, Math.round(dmg * attacker.steal));
       var before = attacker.hp;
@@ -252,20 +234,8 @@ window.Sword = function(canvas, ctx, W, H){
     return false;
   }
 
-  function segSeg(x1,y1,x2,y2,x3,y3,x4,y4){
-    var d = (x2-x1)*(y4-y3) - (y2-y1)*(x4-x3);
-    if(Math.abs(d) < 0.0001) return null;
-    var t = ((x3-x1)*(y4-y3) - (y3-y1)*(x4-x3)) / d;
-    var u = ((x3-x1)*(y2-y1) - (y3-y1)*(x2-x1)) / d;
-    if(t >= 0 && t <= 1 && u >= 0 && u <= 1){
-      return { x: x1 + t*(x2-x1), y: y1 + t*(y2-y1) };
-    }
-    return null;
-  }
-
   function startSwing(f, now){
     if(f.cd > 0 || f.stun > 0 || f.swing > 0) return;
-    if(f.clashCd > now) return;
     f.swing = 1;
     f.resolved = false;
     f.cd = f.sw.cd;
@@ -342,29 +312,6 @@ window.Sword = function(canvas, ctx, W, H){
 
     stepFighter(f1, f2, now, dt);
     stepFighter(f2, f1, now, dt);
-
-    if(f1.swing > 0.25 && f2.swing > 0.25){
-      var clash = segSeg(f1.hx, f1.hy, f1.tx, f1.ty, f2.hx, f2.hy, f2.tx, f2.ty);
-      if(clash){
-        f1.swing = 0; f2.swing = 0;
-
-        var nudge1 = 18 + Math.random() * 16;
-        var nudge2 = 18 + Math.random() * 16;
-        f1.x -= f1.dir * nudge1;
-        f2.x -= f2.dir * nudge2;
-
-        f1.vx -= f1.dir * 7;
-        f2.vx -= f2.dir * 7;
-
-        f1.cd = Math.max(f1.cd, CLASH_LOCKOUT_MS);
-        f2.cd = Math.max(f2.cd, CLASH_LOCKOUT_MS);
-        f1.clashCd = now + CLASH_LOCKOUT_MS;
-        f2.clashCd = now + CLASH_LOCKOUT_MS;
-
-        spark(clash.x, clash.y, '#ff0', 18);
-        texts.push({x:clash.x, y:clash.y - 20, vy:-0.8, life:1, text:'CLASH', color:'#ffee55'});
-      }
-    }
 
     var gap = Math.abs(f1.x - f2.x);
     if(gap < BW + 4){
@@ -459,10 +406,9 @@ window.Sword = function(canvas, ctx, W, H){
   function drawHUD(){
     var dodge1 = Math.round(f1.dodge * 100);
     var dodge2 = Math.round(f2.dodge * 100);
-    var crit1  = Math.round(f1.df.crit * 100);
-    var crit2  = Math.round(f2.df.crit * 100);
+    var crit1  = f1.df.critMult.toFixed(2) + 'x';
+    var crit2  = f2.df.critMult.toFixed(2) + 'x';
 
-    // GREEN side
     ctx.font = '13px monospace';
     ctx.textAlign = 'left';
     ctx.fillStyle = '#0f0';
@@ -472,9 +418,8 @@ window.Sword = function(canvas, ctx, W, H){
     ctx.fillText('HP ' + f1.hp + '/' + f1.maxHp +
                  '   DR ' + f1.dr + '%' +
                  '   Dodge ' + dodge1 + '%' +
-                 '   Crit ' + crit1 + '%', 16, 38);
+                 '   Crit ' + crit1, 16, 38);
 
-    // RED side
     ctx.font = '13px monospace';
     ctx.textAlign = 'right';
     ctx.fillStyle = '#f00';
@@ -484,7 +429,7 @@ window.Sword = function(canvas, ctx, W, H){
     ctx.fillText('HP ' + f2.hp + '/' + f2.maxHp +
                  '   DR ' + f2.dr + '%' +
                  '   Dodge ' + dodge2 + '%' +
-                 '   Crit ' + crit2 + '%', W - 16, 38);
+                 '   Crit ' + crit2, W - 16, 38);
 
     ctx.textAlign = 'center';
     ctx.font = '11px monospace';
