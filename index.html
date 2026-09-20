@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GameHub</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="menuView">
+  <header>
+    <h1>GAMEHUB</h1>
+    <div class="subtitle">select a game</div>
+  </header>
+  <div id="menu">
+    <div class="card" data-game="pong">
+      <h2>PONG BOT PREDICTOR</h2>
+      <p>Auto-playing pong. Six AI difficulties. Watch bots predict the ball.</p>
+    </div>
+    <div class="card" data-game="sword">
+      <h2>BOT SWORD FIGHT</h2>
+      <p>Two bots duel. Pick sword, armor, and difficulty. They fight for real.</p>
+    </div>
+    <div class="card locked"><h2>SOON</h2><p>Slot reserved.</p></div>
+    <div class="card locked"><h2>SOON</h2><p>Slot reserved.</p></div>
+  </div>
+</div>
+
+<div id="gameView">
+  <button id="backBtn">&larr; BACK</button>
+  <canvas id="gameCanvas" width="800" height="500"></canvas>
+</div>
+
+<script src="pong.js"></script>
+<script src="sword.js"></script>
+<script src="main.js"></script>
+
+</body>
+</html>
