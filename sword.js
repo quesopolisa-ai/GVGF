@@ -81,9 +81,27 @@ window.Sword = function(canvas, ctx, W, H){
     t.flash = 1;
     t.stun = Math.max(t.stun, 140);
     t.vx += (t.x < srcX ? -1 : 1) * 3;
-    texts.push({x:t.x, y:GROUND - BH - t.y - 30, vy:-0.9, life:1, text:'-' + dmg});
+    texts.push({
+      x: t.x,
+      y: GROUND - BH - t.y - 30,
+      vy: -0.9, life: 1,
+      text: '-' + dmg,
+      color: '#ff5252'
+    });
     spark(t.x, GROUND - BH/2 - t.y, '#fff', 12);
     if(t.hp <= 0){ t.hp = 0; over = true; winner = (t === f1) ? 2 : 1; st = OVER; }
+  }
+
+  function dodgePop(t, srcX){
+    t.vx += (t.x < srcX ? -1 : 1) * 4;
+    texts.push({
+      x: t.x,
+      y: GROUND - BH - t.y - 30,
+      vy: -0.9, life: 1,
+      text: 'DODGE',
+      color: '#66ccff'
+    });
+    spark(t.x, GROUND - BH/2 - t.y, '#66ccff', 10);
   }
 
   function shoulder(f){
@@ -183,30 +201,20 @@ window.Sword = function(canvas, ctx, W, H){
     f.cd = f.sw.cd;
   }
 
-  // Combined dodge chance: difficulty dodge + armor dodge, as a probability union.
-  // P(A or B) = 1 - (1 - P(A)) * (1 - P(B))
+  // Combined dodge chance: difficulty + armor as probability union.
   function dodgeChance(f){
-    var d = f.df.dodge;
-    var a = f.ar.adodge;
-    return 1 - (1 - d) * (1 - a);
+    return 1 - (1 - f.df.dodge) * (1 - f.ar.adodge);
   }
 
   function think(f, opp){
     var df = f.df;
     var dist = Math.abs(f.x - opp.x);
     var myReach = totalReach(f.sw);
-    var oppReach = totalReach(opp.sw);
 
     var predictX = opp.x + opp.vx * df.pred * 10;
     var aim = Math.abs(f.x - predictX);
 
-    // Dodge incoming swing — uses combined difficulty + armor dodge
-    if(opp.swing > 0.4 && opp.swing < 0.95 && dist < oppReach + 10 && Math.random() < dodgeChance(f)){
-      f.qdodge = (f.x < opp.x) ? -1 : 1;
-      if(Math.random() < df.jump) f.qjump = true;
-      return;
-    }
-
+    // Swing when in range
     if(aim < myReach - 10 && f.cd <= 0 && f.stun <= 0 && Math.random() < df.aggr){
       startSwing(f);
       return;
@@ -249,8 +257,13 @@ window.Sword = function(canvas, ctx, W, H){
 
       if(!f.resolved && prevSwing <= 0.9 && prevSwing >= 0.15){
         if(bladeHits(f, opp)){
-          damage(opp, f.sw.dmg, f.x);
-          spark(f.tx, f.ty, f.sw.color, 14);
+          // Reaction dodge: roll combined difficulty+armor dodge at the moment of impact.
+          if(Math.random() < dodgeChance(opp)){
+            dodgePop(opp, f.x);
+          } else {
+            damage(opp, f.sw.dmg, f.x);
+            spark(f.tx, f.ty, f.sw.color, 14);
+          }
           f.resolved = true;
           f.swing = Math.min(f.swing, 0.2);
         }
@@ -274,7 +287,7 @@ window.Sword = function(canvas, ctx, W, H){
         f1.cd = Math.max(f1.cd, 250); f2.cd = Math.max(f2.cd, 250);
         f1.vx -= f1.dir * 2; f2.vx -= f2.dir * 2;
         spark(clash.x, clash.y, '#ff0', 18);
-        texts.push({x:clash.x, y:clash.y - 20, vy:-0.8, life:1, text:'CLASH'});
+        texts.push({x:clash.x, y:clash.y - 20, vy:-0.8, life:1, text:'CLASH', color:'#ffee55'});
       }
     }
 
@@ -351,7 +364,7 @@ window.Sword = function(canvas, ctx, W, H){
     ctx.strokeStyle = '#555'; ctx.lineWidth = 1; ctx.strokeRect(bx, by, w, bh2);
 
     ctx.font = '10px monospace'; ctx.fillStyle = '#888'; ctx.textAlign = 'center';
-    ctx.fillText(f.sw.n + ' | ' + f.df.n, f.x, by - 6);
+    ctx.fillText(f.sw.n + ' / ' + f.ar.n + ' | ' + f.df.n, f.x, by - 6);
     ctx.textAlign = 'left';
   }
 
@@ -369,13 +382,21 @@ window.Sword = function(canvas, ctx, W, H){
   }
 
   function drawHUD(){
+    var dodge1 = Math.round(dodgeChance(f1) * 100);
+    var dodge2 = Math.round(dodgeChance(f2) * 100);
+
     ctx.font = '13px monospace';
     ctx.textAlign = 'left';
     ctx.fillStyle = '#0f0';
-    ctx.fillText('GREEN: ' + f1.sw.n + ' / ' + f1.ar.n + ' / ' + f1.df.n + '  HP ' + f1.hp + '/' + f1.maxHp, 16, 22);
+    ctx.fillText('GREEN: ' + f1.sw.n + ' / ' + f1.ar.n + ' / ' + f1.df.n +
+                 '  HP ' + f1.hp + '/' + f1.maxHp +
+                 '  Dodge ' + dodge1 + '%', 16, 22);
+
     ctx.textAlign = 'right';
     ctx.fillStyle = '#f00';
-    ctx.fillText('HP ' + f2.hp + '/' + f2.maxHp + '  RED: ' + f2.sw.n + ' / ' + f2.ar.n + ' / ' + f2.df.n, W - 16, 22);
+    ctx.fillText('Dodge ' + dodge2 + '%' +
+                 '  HP ' + f2.hp + '/' + f2.maxHp +
+                 '  RED: ' + f2.sw.n + ' / ' + f2.ar.n + ' / ' + f2.df.n, W - 16, 22);
 
     ctx.textAlign = 'center';
     ctx.font = '11px monospace';
@@ -412,7 +433,7 @@ window.Sword = function(canvas, ctx, W, H){
     for(var t = 0; t < texts.length; t++){
       var ft = texts[t];
       ctx.globalAlpha = Math.max(0, ft.life);
-      ctx.fillStyle = '#ff5252';
+      ctx.fillStyle = ft.color || '#ff5252';
       ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
       ctx.fillText(ft.text, ft.x, ft.y);
       ctx.textAlign = 'left';
@@ -444,7 +465,6 @@ window.Sword = function(canvas, ctx, W, H){
       ctx.font = '18px monospace'; ctx.textAlign = 'left';
       ctx.fillText(items[i].n, W/2 - 280, y);
 
-      // Right-side stats for armor
       if(isArmor){
         ctx.font = '12px monospace';
         ctx.fillStyle = (i === cur) ? '#111' : '#666';
