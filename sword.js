@@ -3,6 +3,7 @@ window.Sword = function(canvas, ctx, W, H){
   var GRAV = 0.6, JUMP = -13;
   var BH = 90, BW = 22, HR = 11;
 
+  // Difficulty: no dodge field — dodge comes only from armor.
   var DIFFS = [
     {n:'EASY',    spd:2.7, react:400, pred:0.0,  jump:0.05, aggr:0.35},
     {n:'NORMAL',  spd:3.9, react:240, pred:0.25, jump:0.15, aggr:0.55},
@@ -11,13 +12,14 @@ window.Sword = function(canvas, ctx, W, H){
     {n:'GODLIKE', spd:7.5, react:40,  pred:1.00, jump:0.45, aggr:1.00}
   ];
 
+  // Cooldowns are 2.1x faster than base (1.5x * 1.4x)
   var SWORDS = [
-    {n:'DAGGER',      reach:46,  dmg:7,  cd:227, color:'#cfd8dc'},
-    {n:'SHORT SWORD', reach:64,  dmg:12, cd:320, color:'#b0bec5'},
-    {n:'LONGSWORD',   reach:90,  dmg:20, cd:453, color:'#e0e0e0'},
-    {n:'GREATSWORD',  reach:112, dmg:32, cd:627, color:'#ffd54f'},
-    {n:'KATANA',      reach:82,  dmg:17, cd:347, color:'#80deea'},
-    {n:'RAPIER',      reach:96,  dmg:11, cd:267, color:'#f48fb1'}
+    {n:'DAGGER',      reach:46,  dmg:7,  cd:162, color:'#cfd8dc'},
+    {n:'SHORT SWORD', reach:64,  dmg:12, cd:229, color:'#b0bec5'},
+    {n:'LONGSWORD',   reach:90,  dmg:20, cd:324, color:'#e0e0e0'},
+    {n:'GREATSWORD',  reach:112, dmg:32, cd:448, color:'#ffd54f'},
+    {n:'KATANA',      reach:82,  dmg:17, cd:248, color:'#80deea'},
+    {n:'RAPIER',      reach:96,  dmg:11, cd:191, color:'#f48fb1'}
   ];
 
   var ARMORS = [
@@ -28,7 +30,7 @@ window.Sword = function(canvas, ctx, W, H){
     {n:'DRAGONSCALE', hp:260, dr:45, adodge:0.40, color:'#66bb6a'}
   ];
 
-  var CLASH_LOCKOUT_MS = 400;
+  var CLASH_LOCKOUT_MS = 600;
 
   var SEL = 0, FIGHT = 1, OVER = 2;
   var st = SEL;
@@ -254,8 +256,8 @@ window.Sword = function(canvas, ctx, W, H){
 
     if(f.swing > 0){
       var prevSwing = f.swing;
-      // 1.5x faster swing animation
-      f.swing = Math.max(0, f.swing - dt * 0.0825);
+      // 2.1x faster swing animation than base
+      f.swing = Math.max(0, f.swing - dt * 0.1155);
       poseHand(f, dt);
       updateTip(f);
 
@@ -283,23 +285,23 @@ window.Sword = function(canvas, ctx, W, H){
     stepFighter(f1, f2, now, dt);
     stepFighter(f2, f1, now, dt);
 
-    // Sword clash: both mid-swing and blades crossing
+    // Sword clash
     if(f1.swing > 0.25 && f2.swing > 0.25){
       var clash = segSeg(f1.hx, f1.hy, f1.tx, f1.ty, f2.hx, f2.hy, f2.tx, f2.ty);
       if(clash){
         f1.swing = 0; f2.swing = 0;
 
-        // Direct position nudge: 2-6px away from each other
-        var nudge1 = 2 + Math.random() * 4;
-        var nudge2 = 2 + Math.random() * 4;
+        // Big position knockback: 18-34px each
+        var nudge1 = 18 + Math.random() * 16;
+        var nudge2 = 18 + Math.random() * 16;
         f1.x -= f1.dir * nudge1;
         f2.x -= f2.dir * nudge2;
 
-        // Velocity kick away from each other
-        f1.vx -= f1.dir * 3;
-        f2.vx -= f2.dir * 3;
+        // Strong velocity kick away
+        f1.vx -= f1.dir * 7;
+        f2.vx -= f2.dir * 7;
 
-        // Lockout so they can't instantly re-swing into the same clash
+        // Lockout so they can't instantly re-swing
         f1.cd = Math.max(f1.cd, CLASH_LOCKOUT_MS);
         f2.cd = Math.max(f2.cd, CLASH_LOCKOUT_MS);
         f1.clashCd = now + CLASH_LOCKOUT_MS;
