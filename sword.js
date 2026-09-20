@@ -5,11 +5,11 @@ window.Sword = function(canvas, ctx, W, H){
 
   // Crit is always active (100% chance). critMult varies by tier.
   var DIFFS = [
-    {n:'EASY',    spd:2.7, react:400, pred:0.0,  jump:0.05, aggr:0.35, critMult:1.10},
-    {n:'NORMAL',  spd:3.9, react:240, pred:0.25, jump:0.15, aggr:0.55, critMult:1.20},
-    {n:'HARD',    spd:5.1, react:140, pred:0.55, jump:0.25, aggr:0.75, critMult:1.35},
+    {n:'EASY',    spd:2.7, react:400, pred:0.0,  jump:0.05, aggr:0.35, critMult:1.50},
+    {n:'NORMAL',  spd:3.9, react:240, pred:0.25, jump:0.15, aggr:0.55, critMult:1.50},
+    {n:'HARD',    spd:5.1, react:140, pred:0.55, jump:0.25, aggr:0.75, critMult:1.50},
     {n:'INSANE',  spd:6.3, react:80,  pred:0.80, jump:0.35, aggr:0.90, critMult:1.50},
-    {n:'GODLIKE', spd:7.5, react:40,  pred:1.00, jump:0.45, aggr:1.00, critMult:2.50}
+    {n:'GODLIKE', spd:7.5, react:40,  pred:1.00, jump:0.45, aggr:1.00, critMult:1.50}
   ];
 
   var SWORDS = [
@@ -33,8 +33,8 @@ window.Sword = function(canvas, ctx, W, H){
     {n:'NONE',     desc:'No modifiers',                        hpMult:1.0, drMod:0,   dodgeMod:0.00, dmgMult:1.0, steal:0.00},
     {n:'ASSASSIN', desc:'+150% dmg, -40% HP',                  hpMult:0.6, drMod:0,   dodgeMod:0.00, dmgMult:2.5, steal:0.00},
     {n:'TANK',     desc:'+50% HP, +20% DR, -20% dmg',          hpMult:1.5, drMod:20,  dodgeMod:0.00, dmgMult:0.8, steal:0.00},
-    {n:'FIGHTER',  desc:'+10% DR, +50% lifesteal, +10% dodge', hpMult:1.0, drMod:10,  dodgeMod:0.10, dmgMult:1.0, steal:0.50},
-    {n:'HEALER',   desc:'+100% HP, -20% DR, +5% dodge',        hpMult:2.0, drMod:-20, dodgeMod:0.05, dmgMult:1.0, steal:0.00}
+    {n:'FIGHTER',  desc:'+10% DR, +30% lifesteal, +10% dodge', hpMult:1.0, drMod:10,  dodgeMod:0.10, dmgMult:1.0, steal:0.30},
+    {n:'HEALER',   desc:'+100% lifesteal, -20% DR, +5% dodge',        hpMult:1.0, drMod:-20, dodgeMod:0.05, dmgMult:1.0, steal:1.00}
   ];
 
   var SEL = 0, FIGHT = 1, OVER = 2;
