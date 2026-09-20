@@ -13,20 +13,20 @@ window.Sword = function(canvas, ctx, W, H){
   ];
 
   var SWORDS = [
-    {n:'DAGGER',      reach:46,  dmg:7,  cd:162, color:'#cfd8dc'},
-    {n:'SHORT SWORD', reach:64,  dmg:12, cd:229, color:'#b0bec5'},
-    {n:'LONGSWORD',   reach:90,  dmg:20, cd:324, color:'#e0e0e0'},
-    {n:'GREATSWORD',  reach:112, dmg:32, cd:448, color:'#ffd54f'},
-    {n:'KATANA',      reach:82,  dmg:17, cd:248, color:'#80deea'},
-    {n:'RAPIER',      reach:96,  dmg:11, cd:191, color:'#f48fb1'}
+    {n:'DAGGER',      reach:60,  dmg:9,  cd:162, color:'#cfd8dc'},
+    {n:'SHORT SWORD', reach:70,  dmg:15, cd:229, color:'#b0bec5'},
+    {n:'LONGSWORD',   reach:100,  dmg:18, cd:324, color:'#e0e0e0'},
+    {n:'GREATSWORD',  reach:120, dmg:28, cd:448, color:'#ffd54f'},
+    {n:'KATANA',      reach:95,  dmg:19, cd:248, color:'#80deea'},
+    {n:'RAPIER',      reach:102,  dmg:15, cd:191, color:'#f48fb1'}
   ];
 
   var ARMORS = [
     {n:'NONE',        hp:100, dr:0,  adodge:0.00, color:'#666'},
     {n:'LEATHER',     hp:120, dr:10, adodge:0.05, color:'#8d6e63'},
-    {n:'CHAINMAIL',   hp:150, dr:20, adodge:0.10, color:'#9e9e9e'},
-    {n:'PLATE',       hp:200, dr:35, adodge:0.20, color:'#cfd8dc'},
-    {n:'DRAGONSCALE', hp:260, dr:45, adodge:0.40, color:'#66bb6a'}
+    {n:'CHAINMAIL',   hp:150, dr:15, adodge:0.10, color:'#9e9e9e'},
+    {n:'PLATE',       hp:200, dr:25, adodge:0.20, color:'#cfd8dc'},
+    {n:'DRAGONSCALE', hp:260, dr:35, adodge:0.40, color:'#66bb6a'}
   ];
 
   // Emblems modify HP, DR, dodge, damage output, and lifesteal.
@@ -37,10 +37,10 @@ window.Sword = function(canvas, ctx, W, H){
   // steal   — fraction of damage dealt that heals self
   var EMBLEMS = [
     {n:'NONE',     desc:'No modifiers',                    hpMult:1.0, drMod:0,   dodgeMod:0.00, dmgMult:1.0, steal:0.00},
-    {n:'ASSASSIN', desc:'+50% dmg, -40% HP',               hpMult:0.6, drMod:0,   dodgeMod:0.00, dmgMult:1.5, steal:0.00},
+    {n:'ASSASSIN', desc:'+150% dmg, -40% HP',               hpMult:0.6, drMod:0,   dodgeMod:0.00, dmgMult:2.5, steal:0.00},
     {n:'TANK',     desc:'+50% HP, +20% DR, -20% dmg',      hpMult:1.5, drMod:20,  dodgeMod:0.00, dmgMult:0.8, steal:0.00},
-    {n:'FIGHTER',  desc:'+10% DR, 25% lifesteal, +10% dodge', hpMult:1.0, drMod:10,  dodgeMod:0.10, dmgMult:1.0, steal:0.25},
-    {n:'HEALER',   desc:'+100% HP, -20% DR, +35% dodge',   hpMult:2.0, drMod:-20, dodgeMod:0.35, dmgMult:1.0, steal:0.00}
+    {n:'FIGHTER',  desc:'+10% DR, +50% lifesteal, +10% dodge', hpMult:1.0, drMod:10,  dodgeMod:0.10, dmgMult:1.0, steal:0.50},
+    {n:'HEALER',   desc:'+100% HP, -20% DR, +5% dodge',   hpMult:2.0, drMod:-20, dodgeMod:0.05, dmgMult:1.0, steal:0.00}
   ];
 
   var CLASH_LOCKOUT_MS = 600;
