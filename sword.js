@@ -3,16 +3,15 @@ window.Sword = function(canvas, ctx, W, H){
   var GRAV = 0.6, JUMP = -13;
   var BH = 90, BW = 22, HR = 11;
 
-  // Difficulty: no dodge field — dodge comes only from armor.
+  // Difficulty: crit chance scaled by tier. No dodge — that's armor/emblem only.
   var DIFFS = [
-    {n:'EASY',    spd:2.7, react:400, pred:0.0,  jump:0.05, aggr:0.35},
-    {n:'NORMAL',  spd:3.9, react:240, pred:0.25, jump:0.15, aggr:0.55},
-    {n:'HARD',    spd:5.1, react:140, pred:0.55, jump:0.25, aggr:0.75},
-    {n:'INSANE',  spd:6.3, react:80,  pred:0.80, jump:0.35, aggr:0.90},
-    {n:'GODLIKE', spd:7.5, react:40,  pred:1.00, jump:0.45, aggr:1.00}
+    {n:'EASY',    spd:2.7, react:400, pred:0.0,  jump:0.05, aggr:0.35, crit:0.10},
+    {n:'NORMAL',  spd:3.9, react:240, pred:0.25, jump:0.15, aggr:0.55, crit:0.20},
+    {n:'HARD',    spd:5.1, react:140, pred:0.55, jump:0.25, aggr:0.75, crit:0.40},
+    {n:'INSANE',  spd:6.3, react:80,  pred:0.80, jump:0.35, aggr:0.90, crit:0.55},
+    {n:'GODLIKE', spd:7.5, react:40,  pred:1.00, jump:0.45, aggr:1.00, crit:0.75}
   ];
 
-  // Cooldowns are 2.1x faster than base (1.5x * 1.4x)
   var SWORDS = [
     {n:'DAGGER',      reach:46,  dmg:7,  cd:162, color:'#cfd8dc'},
     {n:'SHORT SWORD', reach:64,  dmg:12, cd:229, color:'#b0bec5'},
@@ -30,20 +29,37 @@ window.Sword = function(canvas, ctx, W, H){
     {n:'DRAGONSCALE', hp:260, dr:45, adodge:0.40, color:'#66bb6a'}
   ];
 
+  // Emblems modify HP, DR, dodge, damage output, and lifesteal.
+  // hpMult  — multiplies armor HP
+  // drMod   — added to armor DR (percent, can go negative)
+  // dodgeMod— added to armor dodge (fraction)
+  // dmgMult — multiplies outgoing sword damage
+  // steal   — fraction of damage dealt that heals self
+  var EMBLEMS = [
+    {n:'NONE',     desc:'No modifiers',                    hpMult:1.0, drMod:0,   dodgeMod:0.00, dmgMult:1.0, steal:0.00},
+    {n:'ASSASSIN', desc:'+50% dmg, -40% HP',               hpMult:0.6, drMod:0,   dodgeMod:0.00, dmgMult:1.5, steal:0.00},
+    {n:'TANK',     desc:'+50% HP, +20% DR, -20% dmg',      hpMult:1.5, drMod:20,  dodgeMod:0.00, dmgMult:0.8, steal:0.00},
+    {n:'FIGHTER',  desc:'+10% DR, 25% lifesteal, +10% dodge', hpMult:1.0, drMod:10,  dodgeMod:0.10, dmgMult:1.0, steal:0.25},
+    {n:'HEALER',   desc:'+100% HP, -20% DR, +35% dodge',   hpMult:2.0, drMod:-20, dodgeMod:0.35, dmgMult:1.0, steal:0.00}
+  ];
+
   var CLASH_LOCKOUT_MS = 600;
 
   var SEL = 0, FIGHT = 1, OVER = 2;
   var st = SEL;
   var pickStage = 0;
-  var selIdx = [1, 0, 1, 1, 0, 1];
+  // 8 stages per side: sword, armor, emblem, difficulty (x2)
+  var selIdx = [1, 0, 0, 1, 1, 0, 0, 1];
 
   var STAGES = [
-    {label:'GREEN SWORD',      items:SWORDS, col:'#0f0'},
-    {label:'GREEN ARMOR',      items:ARMORS, col:'#0f0'},
-    {label:'GREEN DIFFICULTY', items:DIFFS,  col:'#0f0'},
-    {label:'RED SWORD',        items:SWORDS, col:'#f00'},
-    {label:'RED ARMOR',        items:ARMORS, col:'#f00'},
-    {label:'RED DIFFICULTY',   items:DIFFS,  col:'#f00'}
+    {label:'GREEN SWORD',      items:SWORDS,  col:'#0f0'},
+    {label:'GREEN ARMOR',      items:ARMORS,  col:'#0f0'},
+    {label:'GREEN EMBLEM',     items:EMBLEMS, col:'#0f0'},
+    {label:'GREEN DIFFICULTY', items:DIFFS,   col:'#0f0'},
+    {label:'RED SWORD',        items:SWORDS,  col:'#f00'},
+    {label:'RED ARMOR',        items:ARMORS,  col:'#f00'},
+    {label:'RED EMBLEM',       items:EMBLEMS, col:'#f00'},
+    {label:'RED DIFFICULTY',   items:DIFFS,   col:'#f00'}
   ];
 
   var f1, f2, over = false, winner = 0;
@@ -51,11 +67,24 @@ window.Sword = function(canvas, ctx, W, H){
 
   function totalReach(sw){ return 28 + sw.reach; }
 
-  function mkFighter(x, dir, sw, ar, df, col){
+  function mkFighter(x, dir, swIdx, arIdx, emIdx, dfIdx, col){
+    var sw = SWORDS[swIdx];
+    var ar = ARMORS[arIdx];
+    var em = EMBLEMS[emIdx];
+    var df = DIFFS[dfIdx];
+
+    // Compute combined stats
+    var maxHp  = Math.round(ar.hp * em.hpMult);
+    var dr     = ar.dr + em.drMod;                  // percent, can be negative
+    var dodge  = Math.min(0.95, ar.adodge + em.dodgeMod);
+
     return {
       x:x, y:0, vx:0, vy:0, onGround:true, dir:dir,
-      sw:SWORDS[sw], ar:ARMORS[ar], df:DIFFS[df], col:col,
-      hp:ARMORS[ar].hp, maxHp:ARMORS[ar].hp,
+      sw:sw, ar:ar, em:em, df:df, col:col,
+      hp:maxHp, maxHp:maxHp,
+      dr:dr, dodge:dodge,
+      dmgMult: em.dmgMult,
+      steal: em.steal,
       cd:0, swing:0, resolved:false,
       stun:0, flash:0, lthink:0, qjump:false, qdodge:0,
       clashCd: 0,
@@ -66,8 +95,8 @@ window.Sword = function(canvas, ctx, W, H){
   }
 
   function initFight(){
-    f1 = mkFighter(180,  1, selIdx[0], selIdx[1], selIdx[2], '#0f0');
-    f2 = mkFighter(620, -1, selIdx[3], selIdx[4], selIdx[5], '#f00');
+    f1 = mkFighter(180,  1, selIdx[0], selIdx[1], selIdx[2], selIdx[3], '#0f0');
+    f2 = mkFighter(620, -1, selIdx[4], selIdx[5], selIdx[6], selIdx[7], '#f00');
     over = false; winner = 0; texts = []; sparks = [];
     st = FIGHT;
   }
@@ -79,22 +108,57 @@ window.Sword = function(canvas, ctx, W, H){
     }
   }
 
-  function damage(t, raw, srcX){
-    var dr = t.ar.dr / 100;
-    var dmg = Math.max(1, Math.round(raw * (1 - dr)));
-    t.hp -= dmg;
-    t.flash = 1;
-    t.stun = Math.max(t.stun, 140);
-    t.vx += (t.x < srcX ? -1 : 1) * 3;
+  // Attacker deals damage to target. Rolls crit, applies dmg multiplier,
+  // applies target DR (can be negative = more damage taken), handles lifesteal.
+  function damage(attacker, target){
+    var crit = Math.random() < attacker.df.crit;
+    var critMult = crit ? 1.5 : 1.0;
+    var raw = attacker.sw.dmg * attacker.dmgMult * critMult;
+
+    // DR can be negative (healer) — then damage is amplified
+    var drFrac = target.dr / 100;
+    var dmg = Math.max(1, Math.round(raw * (1 - drFrac)));
+
+    target.hp -= dmg;
+    target.flash = 1;
+    target.stun = Math.max(target.stun, 140);
+    target.vx += (target.x < attacker.x ? -1 : 1) * 3;
+
     texts.push({
-      x: t.x,
-      y: GROUND - BH - t.y - 30,
+      x: target.x,
+      y: GROUND - BH - target.y - 30,
       vy: -0.9, life: 1,
-      text: '-' + dmg,
-      color: '#ff5252'
+      text: (crit ? 'CRIT -' : '-') + dmg,
+      color: crit ? '#ffcc33' : '#ff5252',
+      big: crit
     });
-    spark(t.x, GROUND - BH/2 - t.y, '#fff', 12);
-    if(t.hp <= 0){ t.hp = 0; over = true; winner = (t === f1) ? 2 : 1; st = OVER; }
+
+    // Sparks — bigger burst on crit
+    spark(target.x, GROUND - BH/2 - target.y, crit ? '#ffcc33' : '#fff', crit ? 20 : 12);
+
+    // Lifesteal
+    if(attacker.steal > 0){
+      var heal = Math.max(1, Math.round(dmg * attacker.steal));
+      var before = attacker.hp;
+      attacker.hp = Math.min(attacker.maxHp, attacker.hp + heal);
+      var actualHeal = attacker.hp - before;
+      if(actualHeal > 0){
+        texts.push({
+          x: attacker.x,
+          y: GROUND - BH - attacker.y - 30,
+          vy: -0.9, life: 1,
+          text: '+' + actualHeal,
+          color: '#66ff88'
+        });
+      }
+    }
+
+    if(target.hp <= 0){
+      target.hp = 0;
+      over = true;
+      winner = (target === f1) ? 2 : 1;
+      st = OVER;
+    }
   }
 
   function dodgePop(t, srcX){
@@ -207,11 +271,6 @@ window.Sword = function(canvas, ctx, W, H){
     f.cd = f.sw.cd;
   }
 
-  // Dodge comes only from armor now.
-  function dodgeChance(f){
-    return f.ar.adodge;
-  }
-
   function think(f, opp, now){
     var df = f.df;
     var dist = Math.abs(f.x - opp.x);
@@ -256,17 +315,16 @@ window.Sword = function(canvas, ctx, W, H){
 
     if(f.swing > 0){
       var prevSwing = f.swing;
-      // 2.1x faster swing animation than base
       f.swing = Math.max(0, f.swing - dt * 0.1155);
       poseHand(f, dt);
       updateTip(f);
 
       if(!f.resolved && prevSwing <= 0.9 && prevSwing >= 0.15){
         if(bladeHits(f, opp)){
-          if(Math.random() < dodgeChance(opp)){
+          if(Math.random() < opp.dodge){
             dodgePop(opp, f.x);
           } else {
-            damage(opp, f.sw.dmg, f.x);
+            damage(f, opp);
             spark(f.tx, f.ty, f.sw.color, 14);
           }
           f.resolved = true;
@@ -285,23 +343,19 @@ window.Sword = function(canvas, ctx, W, H){
     stepFighter(f1, f2, now, dt);
     stepFighter(f2, f1, now, dt);
 
-    // Sword clash
     if(f1.swing > 0.25 && f2.swing > 0.25){
       var clash = segSeg(f1.hx, f1.hy, f1.tx, f1.ty, f2.hx, f2.hy, f2.tx, f2.ty);
       if(clash){
         f1.swing = 0; f2.swing = 0;
 
-        // Big position knockback: 18-34px each
         var nudge1 = 18 + Math.random() * 16;
         var nudge2 = 18 + Math.random() * 16;
         f1.x -= f1.dir * nudge1;
         f2.x -= f2.dir * nudge2;
 
-        // Strong velocity kick away
         f1.vx -= f1.dir * 7;
         f2.vx -= f2.dir * 7;
 
-        // Lockout so they can't instantly re-swing
         f1.cd = Math.max(f1.cd, CLASH_LOCKOUT_MS);
         f2.cd = Math.max(f2.cd, CLASH_LOCKOUT_MS);
         f1.clashCd = now + CLASH_LOCKOUT_MS;
@@ -385,7 +439,7 @@ window.Sword = function(canvas, ctx, W, H){
     ctx.strokeStyle = '#555'; ctx.lineWidth = 1; ctx.strokeRect(bx, by, w, bh2);
 
     ctx.font = '10px monospace'; ctx.fillStyle = '#888'; ctx.textAlign = 'center';
-    ctx.fillText(f.sw.n + ' / ' + f.ar.n + ' | ' + f.df.n, f.x, by - 6);
+    ctx.fillText(f.sw.n + ' / ' + f.ar.n + ' / ' + f.em.n, f.x, by - 6);
     ctx.textAlign = 'left';
   }
 
@@ -403,21 +457,34 @@ window.Sword = function(canvas, ctx, W, H){
   }
 
   function drawHUD(){
-    var dodge1 = Math.round(dodgeChance(f1) * 100);
-    var dodge2 = Math.round(dodgeChance(f2) * 100);
+    var dodge1 = Math.round(f1.dodge * 100);
+    var dodge2 = Math.round(f2.dodge * 100);
+    var crit1  = Math.round(f1.df.crit * 100);
+    var crit2  = Math.round(f2.df.crit * 100);
 
+    // GREEN side
     ctx.font = '13px monospace';
     ctx.textAlign = 'left';
     ctx.fillStyle = '#0f0';
-    ctx.fillText('GREEN: ' + f1.sw.n + ' / ' + f1.ar.n + ' / ' + f1.df.n +
-                 '  HP ' + f1.hp + '/' + f1.maxHp +
-                 '  Dodge ' + dodge1 + '%', 16, 22);
+    ctx.fillText('GREEN: ' + f1.sw.n + ' / ' + f1.ar.n + ' / ' + f1.em.n + ' / ' + f1.df.n, 16, 22);
+    ctx.font = '11px monospace';
+    ctx.fillStyle = '#0a0';
+    ctx.fillText('HP ' + f1.hp + '/' + f1.maxHp +
+                 '   DR ' + f1.dr + '%' +
+                 '   Dodge ' + dodge1 + '%' +
+                 '   Crit ' + crit1 + '%', 16, 38);
 
+    // RED side
+    ctx.font = '13px monospace';
     ctx.textAlign = 'right';
     ctx.fillStyle = '#f00';
-    ctx.fillText('Dodge ' + dodge2 + '%' +
-                 '  HP ' + f2.hp + '/' + f2.maxHp +
-                 '  RED: ' + f2.sw.n + ' / ' + f2.ar.n + ' / ' + f2.df.n, W - 16, 22);
+    ctx.fillText(f2.df.n + ' / ' + f2.em.n + ' / ' + f2.ar.n + ' / ' + f2.sw.n + ' :RED', W - 16, 22);
+    ctx.font = '11px monospace';
+    ctx.fillStyle = '#a00';
+    ctx.fillText('HP ' + f2.hp + '/' + f2.maxHp +
+                 '   DR ' + f2.dr + '%' +
+                 '   Dodge ' + dodge2 + '%' +
+                 '   Crit ' + crit2 + '%', W - 16, 38);
 
     ctx.textAlign = 'center';
     ctx.font = '11px monospace';
@@ -455,7 +522,8 @@ window.Sword = function(canvas, ctx, W, H){
       var ft = texts[t];
       ctx.globalAlpha = Math.max(0, ft.life);
       ctx.fillStyle = ft.color || '#ff5252';
-      ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
+      ctx.font = (ft.big ? 'bold 20px' : 'bold 16px') + ' monospace';
+      ctx.textAlign = 'center';
       ctx.fillText(ft.text, ft.x, ft.y);
       ctx.textAlign = 'left';
     }
@@ -469,7 +537,8 @@ window.Sword = function(canvas, ctx, W, H){
     var stage = STAGES[pickStage];
     var items = stage.items;
     var cur = selIdx[pickStage];
-    var isArmor = (stage.items === ARMORS);
+    var isArmor  = (stage.items === ARMORS);
+    var isEmblem = (stage.items === EMBLEMS);
 
     ctx.textAlign = 'center'; ctx.font = '22px monospace';
     ctx.fillStyle = stage.col;
@@ -480,11 +549,11 @@ window.Sword = function(canvas, ctx, W, H){
       var y = startY + i*lineH;
       if(i === cur){
         ctx.fillStyle = stage.col;
-        ctx.fillRect(W/2 - 300, y - 26, 600, 38);
+        ctx.fillRect(W/2 - 320, y - 26, 640, 38);
       }
       ctx.fillStyle = (i === cur) ? '#000' : '#ccc';
       ctx.font = '18px monospace'; ctx.textAlign = 'left';
-      ctx.fillText(items[i].n, W/2 - 280, y);
+      ctx.fillText(items[i].n, W/2 - 300, y);
 
       if(isArmor){
         ctx.font = '12px monospace';
@@ -493,7 +562,13 @@ window.Sword = function(canvas, ctx, W, H){
         var stat = 'HP ' + items[i].hp +
                    '   DR ' + items[i].dr + '%' +
                    '   Dodge ' + Math.round(items[i].adodge * 100) + '%';
-        ctx.fillText(stat, W/2 + 280, y);
+        ctx.fillText(stat, W/2 + 300, y);
+        ctx.textAlign = 'left';
+      } else if(isEmblem){
+        ctx.font = '12px monospace';
+        ctx.fillStyle = (i === cur) ? '#111' : '#666';
+        ctx.textAlign = 'right';
+        ctx.fillText(items[i].desc, W/2 + 300, y);
         ctx.textAlign = 'left';
       }
     }
@@ -501,11 +576,15 @@ window.Sword = function(canvas, ctx, W, H){
     ctx.font = '12px monospace';
     ctx.textAlign = 'center';
     var summary = [];
-    if(pickStage > 0) summary.push('G: ' + SWORDS[selIdx[0]].n + ' / ' + ARMORS[selIdx[1]].n + ' / ' + DIFFS[selIdx[2]].n);
-    if(pickStage > 3) summary.push('R: ' + SWORDS[selIdx[3]].n + ' / ' + ARMORS[selIdx[4]].n + ' / ' + DIFFS[selIdx[5]].n);
+    if(pickStage > 3){
+      summary.push('G: ' + SWORDS[selIdx[0]].n + ' / ' + ARMORS[selIdx[1]].n + ' / ' + EMBLEMS[selIdx[2]].n + ' / ' + DIFFS[selIdx[3]].n);
+    }
+    if(pickStage > 7){
+      summary.push('R: ' + SWORDS[selIdx[4]].n + ' / ' + ARMORS[selIdx[5]].n + ' / ' + EMBLEMS[selIdx[6]].n + ' / ' + DIFFS[selIdx[7]].n);
+    }
     if(summary.length){
       ctx.fillStyle = '#444';
-      ctx.fillText(summary.join('    '), W/2, H - 50);
+      ctx.fillText(summary.join('   '), W/2, H - 50);
     }
     ctx.fillStyle = '#666';
     ctx.fillText('UP/DOWN = move  |  ENTER = confirm  |  ESC = menu', W/2, H - 25);
@@ -527,7 +606,7 @@ window.Sword = function(canvas, ctx, W, H){
         e.preventDefault();
       } else if(k === 'Enter'){
         pickStage++;
-        if(pickStage >= 6){ initFight(); pickStage = 0; }
+        if(pickStage >= 8){ initFight(); pickStage = 0; }
         e.preventDefault();
       }
       return;
@@ -556,7 +635,7 @@ window.Sword = function(canvas, ctx, W, H){
 
   function start(){
     st = SEL; pickStage = 0;
-    selIdx = [1, 0, 1, 1, 0, 1];
+    selIdx = [1, 0, 0, 1, 1, 0, 0, 1];
     over = false; winner = 0;
     texts = []; sparks = [];
     document.removeEventListener('keydown', key, true);
