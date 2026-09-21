@@ -1,0 +1,1532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GameHub — Sword Fight</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh;
+    font-family: 'Courier New', monospace;
+  }
+  #backBtn {
+    position: fixed; top: 16px; left: 16px;
+    background: #141414; border: 1px solid #333; color: #aaa;
+    padding: 8px 16px; font-family: inherit; font-size: 12px;
+    letter-spacing: 2px; cursor: pointer; z-index: 10;
+    text-decoration: none;
+  }
+  #backBtn:hover { color: #0f0; border-color: #0f0; }
+  canvas { background: #000; max-width: 100vw; max-height: 100vh; }
+</style>
+</head>
+<body>
+
+<a id="backBtn" href="index.html">&larr; BACK</a>
+<canvas id="gameCanvas" width="800" height="500"></canvas>
+
+<script>
+(function(){
+  var canvas = document.getElementById('gameCanvas');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  var GROUND = H - 60;
+  var GRAV = 0.6, JUMP = -13;
+  var BH = 90, BW = 22, HR = 11;
+  var ROUNDS_TO_WIN = 11;
+  var DR_CAP = 80;
+
+  var PARRY_SPIN_MS      = 1600;
+  var PARRY_LAND_MS      = 550;
+  var PARRY_DISARM_MS    = 420;
+  var PARRY_SLASH_MS     = 170;
+  var PARRY_SLASH_COUNT  = 5;
+  var PARRY_END_MS       = 500;
+  var PARRY_TOUCH_RANGE  = 12;
+  var PARRY_DODGE_CHANCE = 0.45;
+  var LEGENDARY_CHANCE   = 0.25;
+
+  var SLASH_ARCS = [
+    {from: -100, to:  30},
+    {from:   60, to: -50},
+    {from:  -20, to:  20},
+    {from:  -80, to:  60},
+    {from:  -85, to:  85}
+  ];
+
+  var DIFFS = [
+    {n:'EASY',    spd:2.7, react:400, pred:0.0,  jump:0.05, aggr:0.35, critMult:1.10},
+    {n:'NORMAL',  spd:3.9, react:240, pred:0.25, jump:0.15, aggr:0.55, critMult:1.20},
+    {n:'HARD',    spd:5.1, react:140, pred:0.55, jump:0.25, aggr:0.75, critMult:1.35},
+    {n:'INSANE',  spd:6.3, react:80,  pred:0.80, jump:0.35, aggr:0.90, critMult:1.50},
+    {n:'GODLIKE', spd:7.5, react:40,  pred:1.00, jump:0.45, aggr:1.00, critMult:2.50}
+  ];
+
+  var SWORDS = [
+    {n:'DAGGER',      reach:60,  dmg:9,  cd:162, color:'#cfd8dc'},
+    {n:'SHORT SWORD', reach:70,  dmg:15, cd:229, color:'#b0bec5'},
+    {n:'LONGSWORD',   reach:100, dmg:18, cd:324, color:'#e0e0e0'},
+    {n:'GREATSWORD',  reach:120, dmg:28, cd:448, color:'#ffd54f'},
+    {n:'KATANA',      reach:95,  dmg:19, cd:248, color:'#80deea'},
+    {n:'RAPIER',      reach:102, dmg:15, cd:191, color:'#f48fb1'}
+  ];
+
+  var ARMORS = [
+    {n:'NONE',        hp:100, dr:0,  adodge:0.00, color:'#666'},
+    {n:'LEATHER',     hp:120, dr:10, adodge:0.05, color:'#8d6e63'},
+    {n:'CHAINMAIL',   hp:150, dr:15, adodge:0.10, color:'#9e9e9e'},
+    {n:'PLATE',       hp:200, dr:25, adodge:0.20, color:'#cfd8dc'},
+    {n:'DRAGONSCALE', hp:260, dr:35, adodge:0.40, color:'#66bb6a'}
+  ];
+
+  var EMBLEMS = [
+    {n:'NONE',     desc:'No modifiers',                        hpMult:1.0, drMod:0,   dodgeMod:0.00, dmgMult:1.0, steal:0.00},
+    {n:'ASSASSIN', desc:'+150% dmg, -40% HP',                  hpMult:0.6, drMod:0,   dodgeMod:0.00, dmgMult:2.5, steal:0.00},
+    {n:'TANK',     desc:'+50% HP, +20% DR, -20% dmg',          hpMult:1.5, drMod:20,  dodgeMod:0.00, dmgMult:0.8, steal:0.00},
+    {n:'FIGHTER',  desc:'+10% DR, +50% lifesteal, +10% dodge', hpMult:1.0, drMod:10,  dodgeMod:0.10, dmgMult:1.0, steal:0.50},
+    {n:'HEALER',   desc:'+100% HP, -20% DR, +5% dodge',        hpMult:2.0, drMod:-20, dodgeMod:0.05, dmgMult:1.0, steal:0.00}
+  ];
+
+  var CARD_POOL = [
+    {n:'VAMPIRIC', desc:'+10% lifesteal', color:'#ff4466',
+     apply:function(f){ f.steal = Math.min(2.0, f.steal + 0.10); }},
+    {n:'EVASIVE',  desc:'+5% dodge',      color:'#66ccff',
+     apply:function(f){ f.dodge = Math.min(0.95, f.dodge + 0.05); }},
+    {n:'BRUTAL',   desc:'+25% damage',    color:'#ff9933',
+     apply:function(f){ f.dmgBonus += 0.25; }},
+    {n:'ARMORED',  desc:'+10% DR',        color:'#66ff88',
+     apply:function(f){ f.dr = Math.min(DR_CAP, f.dr + 10); }},
+    {n:'VITALITY', desc:'+50% max HP',    color:'#ff66aa',
+     apply:function(f){ f.maxHp = Math.round(f.maxHp * 1.5); f.hp = f.maxHp; }},
+    {n:'ONE HIT MASTER', desc:'x2 CRIT (compounds)', color:'#ff2222', legendary:true,
+     apply:function(f){ f.critMultiplier *= 2; }},
+    {n:'ONE HIT DEAD',   desc:'x2 DAMAGE (compounds)', color:'#ff00ff', legendary:true,
+     apply:function(f){ f.dmgMultiplier *= 2; }}
+  ];
+
+  var SEL = 0, FIGHT = 1, CARD = 2, MATCH_OVER = 3, PARRY = 4;
+  var st = SEL;
+  var pickStage = 0;
+  var selIdx = [1, 0, 0, 1, 1, 0, 0, 1];
+
+  var STAGES = [
+    {label:'GREEN SWORD',      items:SWORDS,  col:'#0f0'},
+    {label:'GREEN ARMOR',      items:ARMORS,  col:'#0f0'},
+    {label:'GREEN EMBLEM',     items:EMBLEMS, col:'#0f0'},
+    {label:'GREEN DIFFICULTY', items:DIFFS,   col:'#0f0'},
+    {label:'RED SWORD',        items:SWORDS,  col:'#f00'},
+    {label:'RED ARMOR',        items:ARMORS,  col:'#f00'},
+    {label:'RED EMBLEM',       items:EMBLEMS, col:'#f00'},
+    {label:'RED DIFFICULTY',   items:DIFFS,   col:'#f00'}
+  ];
+
+  var f1, f2, winner = 0;
+  var texts = [], sparks = [];
+
+  var cardOptions = [];
+  var cardCursor = 0;
+  var cardLoser = null;
+  var cardRerolled = false;
+
+  var parryPoint = null;
+  var parryWinner = 0;
+  var parryAttacker = null;
+  var parryLoser = null;
+  var parryStart = 0;
+  var parryPhase = 'spin';
+  var parryPhaseStart = 0;
+  var parrySlashIdx = 0;
+  var parrySlashHit = [];
+  var parrySlashDamages = [];
+  var parrySlashActual = [];
+  var parrySlashDodged = [];
+  var parryAngleStart = 0;
+  var parryAngleEnd = 0;
+  var parryDisarmSword = null;
+  var parryHitFlash = 0;
+  var parryTotalDealt = 0;
+  var parryDoneAt = 0;
+  var parryFinalSlice = null;
+
+  function totalReach(sw){ return 28 + sw.reach; }
+
+  function mkFighter(x, dir, swIdx, arIdx, emIdx, dfIdx, col){
+    var sw = SWORDS[swIdx];
+    var ar = ARMORS[arIdx];
+    var em = EMBLEMS[emIdx];
+    var df = DIFFS[dfIdx];
+
+    var maxHp = Math.round(ar.hp * em.hpMult);
+    var dr = Math.max(-100, Math.min(DR_CAP, ar.dr + em.drMod));
+    var dodge = Math.min(0.95, ar.adodge + em.dodgeMod);
+
+    return {
+      x:x, y:0, vx:0, vy:0, onGround:true, dir:dir,
+      sw:sw, ar:ar, em:em, df:df, col:col,
+      hp:maxHp, maxHp:maxHp,
+      dr:dr, dodge:dodge,
+      dmgMult: em.dmgMult,
+      dmgBonus: 0,
+      critMultiplier: 1,
+      dmgMultiplier: 1,
+      steal: em.steal,
+      score: 0,
+      cd:0, swing:0, resolved:false,
+      stun:0, flash:0, lthink:0, qjump:false, qdodge:0,
+      hx: x + dir*22, hy: GROUND - BH + 30,
+      pHx:0, pHy:0, pTx:0, pTy:0,
+      tx:0, ty:0,
+      bob: Math.random() * 10,
+      lean: 0,
+      lungeApplied: false,
+      footJitter: 0,
+      disarmed: false
+    };
+  }
+
+  function totalCritMult(f){ return f.df.critMult * f.critMultiplier; }
+  function totalDmgMult(f){  return f.dmgMult * (1 + f.dmgBonus) * f.dmgMultiplier; }
+
+  function rawDamage(attacker){
+    return attacker.sw.dmg * totalDmgMult(attacker) * totalCritMult(attacker);
+  }
+
+  function applyDR(raw, target){
+    var drFrac = Math.max(-1, Math.min(DR_CAP / 100, target.dr / 100));
+    return Math.max(1, Math.round(raw * (1 - drFrac)));
+  }
+
+  function initMatch(){
+    f1 = mkFighter(180,  1, selIdx[0], selIdx[1], selIdx[2], selIdx[3], '#0f0');
+    f2 = mkFighter(620, -1, selIdx[4], selIdx[5], selIdx[6], selIdx[7], '#f00');
+    startRound();
+  }
+
+  function startRound(){
+    f1.x = 180; f1.y = 0; f1.vx = 0; f1.vy = 0; f1.onGround = true; f1.dir = 1;
+    f2.x = 620; f2.y = 0; f2.vx = 0; f2.vy = 0; f2.onGround = true; f2.dir = -1;
+
+    f1.hp = f1.maxHp;
+    f2.hp = f2.maxHp;
+
+    f1.cd = 0; f1.swing = 0; f1.resolved = false; f1.stun = 0; f1.flash = 0;
+    f2.cd = 0; f2.swing = 0; f2.resolved = false; f2.stun = 0; f2.flash = 0;
+
+    f1.lthink = 0; f2.lthink = 0;
+    f1.qjump = false; f1.qdodge = 0;
+    f2.qjump = false; f2.qdodge = 0;
+
+    f1.lean = 0; f2.lean = 0;
+    f1.lungeApplied = false; f2.lungeApplied = false;
+    f1.disarmed = false; f2.disarmed = false;
+
+    f1.hx = f1.x + f1.dir*22; f1.hy = GROUND - BH + 30;
+    f2.hx = f2.x + f2.dir*22; f2.hy = GROUND - BH + 30;
+    f1.tx = f1.hx; f1.ty = f1.hy;
+    f2.tx = f2.hx; f2.ty = f2.hy;
+    f1.pHx = f1.hx; f1.pHy = f1.hy; f1.pTx = f1.hx; f1.pTy = f1.hy;
+    f2.pHx = f2.hx; f2.pHy = f2.hy; f2.pTx = f2.hx; f2.pTy = f2.hy;
+
+    texts = []; sparks = [];
+    parryPoint = null;
+    parryDisarmSword = null;
+    parryFinalSlice = null;
+    st = FIGHT;
+    last = performance.now();
+  }
+
+  function spark(x, y, color, n){
+    for(var i = 0; i < n; i++){
+      var a = Math.random()*Math.PI*2, s = 1.5 + Math.random()*3;
+      sparks.push({x:x, y:y, vx:Math.cos(a)*s, vy:Math.sin(a)*s - 1, life:1, color:color});
+    }
+  }
+
+  function damage(attacker, target){
+    var raw = rawDamage(attacker);
+    var dmg = applyDR(raw, target);
+
+    target.hp -= dmg;
+    target.flash = 1;
+    target.stun = Math.max(target.stun, 140);
+    target.vx += (target.x < attacker.x ? -1 : 1) * 3;
+    target.lean -= (target.x < attacker.x ? -0.8 : 0.8);
+
+    texts.push({
+      x: target.x,
+      y: GROUND - BH - target.y - 30,
+      vy: -0.9, life: 1,
+      text: '-' + dmg,
+      color: '#ff5252'
+    });
+
+    spark(target.x, GROUND - BH/2 - target.y, '#fff', 12);
+
+    if(attacker.steal > 0){
+      var heal = Math.max(1, Math.round(dmg * attacker.steal));
+      var before = attacker.hp;
+      attacker.hp = Math.min(attacker.maxHp, attacker.hp + heal);
+      var actualHeal = attacker.hp - before;
+      if(actualHeal > 0){
+        texts.push({
+          x: attacker.x,
+          y: GROUND - BH - attacker.y - 30,
+          vy: -0.9, life: 1,
+          text: '+' + actualHeal,
+          color: '#66ff88'
+        });
+      }
+    }
+
+    if(target.hp <= 0){
+      target.hp = 0;
+      attacker.score++;
+
+      if(attacker.score >= ROUNDS_TO_WIN){
+        winner = (attacker === f1) ? 1 : 2;
+        st = MATCH_OVER;
+      } else {
+        cardLoser = target;
+        showCards();
+        st = CARD;
+      }
+    }
+  }
+
+  function showCards(){ rollCards(); cardRerolled = false; }
+
+  function rollCards(){
+    var normals = [0, 1, 2, 3, 4];
+    for(var s = normals.length - 1; s > 0; s--){
+      var j = Math.floor(Math.random() * (s + 1));
+      var t = normals[s]; normals[s] = normals[j]; normals[j] = t;
+    }
+    cardOptions = [normals[0], normals[1], normals[2]];
+
+    if(Math.random() < LEGENDARY_CHANCE){
+      var legIdx = 5 + Math.floor(Math.random() * 2);
+      var slot = Math.floor(Math.random() * 3);
+      cardOptions[slot] = legIdx;
+    }
+
+    cardCursor = 0;
+  }
+
+  function doReroll(){ if(cardRerolled) return; rollCards(); cardRerolled = true; }
+
+  function applyCard(){
+    CARD_POOL[cardOptions[cardCursor]].apply(cardLoser);
+    cardLoser.dr = Math.max(-100, Math.min(DR_CAP, cardLoser.dr));
+    startRound();
+  }
+
+  function dodgePop(t, srcX){
+    t.vx += (t.x < srcX ? -1 : 1) * 4;
+    texts.push({
+      x: t.x, y: GROUND - BH - t.y - 30, vy: -0.9, life: 1,
+      text: 'DODGE', color: '#66ccff'
+    });
+    spark(t.x, GROUND - BH/2 - t.y, '#66ccff', 10);
+  }
+
+  function shoulder(f){
+    var bobY = Math.sin(f.bob) * 1.5;
+    var leanX = f.lean * 3;
+    return { x: f.x + f.dir*6 + leanX, y: (GROUND - f.y) - BH + 20 + bobY };
+  }
+
+  function poseHand(f, dt){
+    var sh = shoulder(f);
+    var tx, ty;
+    if(f.swing > 0){
+      var t = 1 - f.swing;
+      var ang;
+      if(t < 0.2){ ang = -Math.PI * 0.55; }
+      else if(t < 0.65){
+        var u = (t - 0.2) / 0.45;
+        ang = -Math.PI * 0.55 + u * Math.PI * 0.9;
+      } else { ang = Math.PI * 0.35; }
+      var worldAng = (f.dir > 0) ? ang : (Math.PI - ang);
+      var armLen = 26 + f.sw.reach * 0.35;
+      tx = sh.x + Math.cos(worldAng) * armLen;
+      ty = sh.y + Math.sin(worldAng) * armLen;
+    } else {
+      tx = sh.x + f.dir * 22;
+      ty = sh.y - 4;
+    }
+    var rate = f.swing > 0 ? 0.75 : 0.3;
+    f.hx += (tx - f.hx) * rate * dt;
+    f.hy += (ty - f.hy) * rate * dt;
+  }
+
+  function updateTip(f){
+    var sh = shoulder(f);
+    var dx = f.hx - sh.x, dy = f.hy - sh.y;
+    var len = Math.sqrt(dx*dx + dy*dy) || 1;
+    f.tx = f.hx + (dx/len) * f.sw.reach;
+    f.ty = f.hy + (dy/len) * f.sw.reach;
+  }
+
+  function segRect(x1, y1, x2, y2, rx1, ry1, rx2, ry2){
+    var dx = x2 - x1, dy = y2 - y1;
+    var t0 = 0, t1 = 1;
+    var p = [-dx, dx, -dy, dy];
+    var q = [x1 - rx1, rx2 - x1, y1 - ry1, ry2 - y1];
+    for(var i = 0; i < 4; i++){
+      if(p[i] === 0){ if(q[i] < 0) return false; }
+      else {
+        var r = q[i] / p[i];
+        if(p[i] < 0){ if(r > t1) return false; if(r > t0) t0 = r; }
+        else        { if(r < t0) return false; if(r < t1) t1 = r; }
+      }
+    }
+    return true;
+  }
+
+  function segSeg(x1, y1, x2, y2, x3, y3, x4, y4){
+    var d = (x2-x1)*(y4-y3) - (y2-y1)*(x4-x3);
+    if(Math.abs(d) < 0.0001) return null;
+    var t = ((x3-x1)*(y4-y3) - (y3-y1)*(x4-x3)) / d;
+    var u = ((x3-x1)*(y2-y1) - (y3-y1)*(x2-x1)) / d;
+    if(t >= 0 && t <= 1 && u >= 0 && u <= 1){
+      return { x: x1 + t*(x2-x1), y: y1 + t*(y2-y1) };
+    }
+    return null;
+  }
+
+  function ptSegDist(px, py, x1, y1, x2, y2){
+    var dx = x2 - x1, dy = y2 - y1;
+    var len2 = dx*dx + dy*dy;
+    if(len2 < 0.0001) return Math.hypot(px - x1, py - y1);
+    var t = ((px - x1)*dx + (py - y1)*dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    var cx = x1 + t*dx, cy = y1 + t*dy;
+    return Math.hypot(px - cx, py - cy);
+  }
+
+  function bladesTouch(aHx, aHy, aTx, aTy, bHx, bHy, bTx, bTy){
+    if(segSeg(aHx, aHy, aTx, aTy, bHx, bHy, bTx, bTy)) return {x:(aTx+bTx)/2, y:(aTy+bTy)/2};
+    var N = 10;
+    for(var i = 0; i <= N; i++){
+      var u = i / N;
+      var px = aHx + (aTx - aHx) * u;
+      var py = aHy + (aTy - aHy) * u;
+      var d = ptSegDist(px, py, bHx, bHy, bTx, bTy);
+      if(d < PARRY_TOUCH_RANGE) return {x: px, y: py};
+    }
+    for(var j = 0; j <= N; j++){
+      var v = j / N;
+      var qx = bHx + (bTx - bHx) * v;
+      var qy = bHy + (bTy - bHy) * v;
+      var d2 = ptSegDist(qx, qy, aHx, aHy, aTx, aTy);
+      if(d2 < PARRY_TOUCH_RANGE) return {x: qx, y: qy};
+    }
+    return null;
+  }
+
+  function bladeHits(f, target){
+    var bx1 = target.x - BW/2;
+    var bx2 = target.x + BW/2;
+    var by1 = GROUND - BH - target.y;
+    var by2 = GROUND - target.y;
+    var N = 12;
+    for(var i = 0; i <= N; i++){
+      var u = i / N;
+      var hx = f.pHx + (f.hx - f.pHx) * u;
+      var hy = f.pHy + (f.hy - f.pHy) * u;
+      var tx = f.pTx + (f.tx - f.pTx) * u;
+      var ty = f.pTy + (f.ty - f.pTy) * u;
+      if(segRect(hx, hy, tx, ty, bx1, by1, bx2, by2)) return true;
+    }
+    return false;
+  }
+
+  function startSwing(f, now){
+    if(f.cd > 0 || f.stun > 0 || f.swing > 0) return;
+    f.swing = 1;
+    f.resolved = false;
+    f.cd = f.sw.cd;
+    f.lungeApplied = false;
+    f.vx -= f.dir * 1.8;
+  }
+
+  function startParry(now, point){
+    f1.swing = 0; f2.swing = 0;
+    f1.resolved = true; f2.resolved = true;
+    f1.cd = Math.max(f1.cd, 500);
+    f2.cd = Math.max(f2.cd, 500);
+    f1.vx -= f1.dir * 3;
+    f2.vx -= f2.dir * 3;
+
+    parryPoint = point;
+    parryWinner = Math.random() < 0.5 ? 1 : 2;
+    parryAttacker = (parryWinner === 1) ? f1 : f2;
+    parryLoser    = (parryWinner === 1) ? f2 : f1;
+
+    parryStart = now;
+    parryPhase = 'spin';
+    parryPhaseStart = now;
+    parrySlashIdx = 0;
+    parrySlashHit = [false, false, false, false, false];
+    parrySlashDodged = [false, false, false, false, false];
+    parryDisarmSword = null;
+    parryHitFlash = 0;
+    parryTotalDealt = 0;
+    parryFinalSlice = null;
+
+    var raw = rawDamage(parryAttacker);
+    var perDmg = applyDR(raw, parryLoser);
+    var finalDmg = applyDR(raw * 1.1, parryLoser);
+    parrySlashDamages = [perDmg, perDmg, perDmg, perDmg, finalDmg];
+    parrySlashActual = [0, 0, 0, 0, 0];
+
+    var slices = 8;
+    var sliceW = Math.PI * 2 / slices;
+    var sliceOptions = (parryWinner === 1) ? [0, 2, 4, 6] : [1, 3, 5, 7];
+    var targetSlice = sliceOptions[Math.floor(Math.random() * 4)];
+    var sliceCenter = targetSlice * sliceW + sliceW / 2;
+    var pointerAngle = -Math.PI / 2;
+    var baseAngle = pointerAngle - sliceCenter;
+    parryAngleStart = 0;
+    parryAngleEnd = baseAngle + 4 * Math.PI * 2;
+
+    st = PARRY;
+  }
+
+  function stepParry(now){
+    var elapsed = now - parryPhaseStart;
+    parryHitFlash = Math.max(0, parryHitFlash - 0.08);
+
+    if(parryDisarmSword){
+      parryDisarmSword.x += parryDisarmSword.vx;
+      parryDisarmSword.y += parryDisarmSword.vy;
+      parryDisarmSword.vy += 0.55;
+      parryDisarmSword.rot += parryDisarmSword.rotV;
+      parryDisarmSword.vx *= 0.995;
+      parryDisarmSword.life -= 0.008;
+    }
+
+    if(parryFinalSlice){
+      parryFinalSlice.life -= 0.018;
+      if(parryFinalSlice.life <= 0) parryFinalSlice = null;
+    }
+
+    if(parryPhase === 'spin'){
+      if(elapsed >= PARRY_SPIN_MS){
+        parryPhase = 'land';
+        parryPhaseStart = now;
+      }
+    } else if(parryPhase === 'land'){
+      if(elapsed >= PARRY_LAND_MS){
+        parryPhase = 'disarm';
+        parryPhaseStart = now;
+
+        parryAttacker.dir = (parryAttacker.x < parryLoser.x) ? 1 : -1;
+        parryAttacker.x = parryLoser.x - parryAttacker.dir * 55;
+        parryAttacker.y = 0;
+        parryAttacker.vx = 0; parryAttacker.vy = 0;
+        parryAttacker.lean = parryAttacker.dir * 0.6;
+
+        parryLoser.dir = -parryAttacker.dir;
+        parryLoser.lean = parryAttacker.dir * -0.4;
+
+        var awayDir = (parryLoser.x < parryAttacker.x) ? -1 : 1;
+        parryDisarmSword = {
+          x: parryLoser.tx,
+          y: parryLoser.ty,
+          vx: awayDir * 8 + (Math.random() * 2 - 1),
+          vy: -6,
+          rot: 0,
+          rotV: awayDir * 0.4,
+          color: parryLoser.sw.color,
+          life: 1.4
+        };
+
+        parryLoser.disarmed = true;
+        spark(parryLoser.tx, parryLoser.ty, '#ffee55', 16);
+        texts.push({
+          x: parryLoser.tx, y: parryLoser.ty - 20, vy: -0.9, life: 1.2,
+          text: 'DISARM!', color: '#ffee55'
+        });
+      }
+    } else if(parryPhase === 'disarm'){
+      if(elapsed >= PARRY_DISARM_MS){
+        parryPhase = 'slash';
+        parryPhaseStart = now;
+        parrySlashIdx = 0;
+      }
+    } else if(parryPhase === 'slash'){
+      var slashT = elapsed / PARRY_SLASH_MS;
+      if(slashT >= 0.55 && !parrySlashHit[parrySlashIdx]){
+        parrySlashHit[parrySlashIdx] = true;
+        applySlashHit(parrySlashIdx);
+      }
+      if(slashT >= 1){
+        parrySlashIdx++;
+        parryPhaseStart = now;
+        if(parrySlashIdx >= PARRY_SLASH_COUNT){
+          parryPhase = 'done';
+          parryPhaseStart = now;
+          parryDoneAt = now;
+        }
+      }
+    } else if(parryPhase === 'done'){
+      if(elapsed >= PARRY_END_MS){
+        resolveParryEnd();
+      }
+    }
+  }
+
+  function applySlashHit(idx){
+    var isFinal = (idx === PARRY_SLASH_COUNT - 1);
+
+    if(parryLoser.hp <= 0){
+      parrySlashActual[idx] = 0;
+      parryHitFlash = 0.5;
+      return;
+    }
+
+    var hitX = parryLoser.x;
+    var hitY = GROUND - BH/2 - parryLoser.y;
+    var offX = (idx - 2) * 14;
+
+    if(Math.random() < PARRY_DODGE_CHANCE){
+      parrySlashDodged[idx] = true;
+      parrySlashActual[idx] = 0;
+      parryLoser.vx += parryAttacker.dir * 3;
+      parryLoser.lean += parryAttacker.dir * 0.3;
+
+      texts.push({
+        x: hitX + offX,
+        y: hitY - 34,
+        vy: -1.0, life: 1.4,
+        text: isFinal ? 'FINAL DODGED!' : 'DODGED!',
+        color: '#66ccff',
+        big: true
+      });
+
+      spark(hitX, hitY, '#66ccff', 12);
+      parryHitFlash = 0.4;
+      return;
+    }
+
+    var planned = parrySlashDamages[idx];
+    var actual = Math.min(planned, parryLoser.hp);
+    parryLoser.hp -= actual;
+    parrySlashActual[idx] = actual;
+    parryTotalDealt += actual;
+
+    parryLoser.flash = 1;
+    parryLoser.stun = 200;
+    parryLoser.vx += parryAttacker.dir * 2;
+    parryLoser.lean += parryAttacker.dir * 0.6;
+
+    texts.push({
+      x: hitX + offX,
+      y: hitY - 34,
+      vy: -1.0, life: 1.6,
+      text: (isFinal ? 'FINAL SLASH  ' : 'SLASH ' + (idx + 1) + '  ') + '-' + actual,
+      color: isFinal ? '#ff3333' : '#ffcc33',
+      big: true
+    });
+
+    texts.push({
+      x: hitX + offX,
+      y: hitY - 14,
+      vy: -0.7, life: 1.4,
+      text: 'total ' + parryTotalDealt,
+      color: '#ff9933'
+    });
+
+    if(isFinal){
+      parryFinalSlice = {
+        x: parryLoser.x,
+        y: GROUND - BH/2 - parryLoser.y,
+        life: 1.0,
+        angle: parryAttacker.dir > 0 ? 0.12 : -0.12
+      };
+      spark(hitX, hitY, '#fff', 30);
+      spark(hitX, hitY, '#ff3333', 20);
+      parryHitFlash = 1.5;
+    } else {
+      spark(hitX, hitY, '#fff', 14);
+      spark(hitX, hitY, '#ffee55', 8);
+      parryHitFlash = 1;
+    }
+  }
+
+  function resolveParryEnd(){
+    if(parryAttacker.steal > 0 && parryTotalDealt > 0){
+      var heal = Math.max(1, Math.round(parryTotalDealt * parryAttacker.steal));
+      parryAttacker.hp = Math.min(parryAttacker.maxHp, parryAttacker.hp + heal);
+    }
+
+    if(parryLoser.hp <= 0){
+      parryLoser.hp = 0;
+      parryAttacker.score++;
+
+      if(parryAttacker.score >= ROUNDS_TO_WIN){
+        winner = (parryAttacker === f1) ? 1 : 2;
+        st = MATCH_OVER;
+      } else {
+        cardLoser = parryLoser;
+        showCards();
+        st = CARD;
+      }
+    } else {
+      parryPoint = null;
+      parryLoser.disarmed = false;
+      parryLoser.cd = 400;
+      parryAttacker.cd = 400;
+      parryLoser.stun = 0;
+      parryAttacker.stun = 0;
+      st = FIGHT;
+      last = performance.now();
+    }
+  }
+
+  function computeSlashPose(attacker, slashIdx, t){
+    var arc = SLASH_ARCS[slashIdx];
+    var fromRad = arc.from * Math.PI / 180;
+    var toRad   = arc.to   * Math.PI / 180;
+    if(attacker.dir < 0){ fromRad = Math.PI - fromRad; toRad = Math.PI - toRad; }
+    var eased = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2;
+    var ang = fromRad + (toRad - fromRad) * eased;
+
+    var sh = shoulder(attacker);
+    var armLen = 26 + attacker.sw.reach * 0.35;
+    var hx = sh.x + Math.cos(ang) * armLen;
+    var hy = sh.y + Math.sin(ang) * armLen;
+    var dx = hx - sh.x, dy = hy - sh.y;
+    var dl = Math.sqrt(dx*dx + dy*dy) || 1;
+    return {
+      hx: hx, hy: hy,
+      tx: hx + (dx/dl) * attacker.sw.reach,
+      ty: hy + (dy/dl) * attacker.sw.reach
+    };
+  }
+
+  function updateParryPoses(now){
+    if(!parryAttacker) return;
+
+    if(parryPhase === 'slash'){
+      var slashT = Math.min(1, (now - parryPhaseStart) / PARRY_SLASH_MS);
+      var pose = computeSlashPose(parryAttacker, parrySlashIdx, slashT);
+      parryAttacker.hx = pose.hx;
+      parryAttacker.hy = pose.hy;
+      parryAttacker.tx = pose.tx;
+      parryAttacker.ty = pose.ty;
+    } else if(parryPhase === 'disarm'){
+      var sh = shoulder(parryAttacker);
+      var armLen = 26 + parryAttacker.sw.reach * 0.35;
+      var readyAng = parryAttacker.dir > 0 ? -Math.PI * 0.8 : -Math.PI * 0.2;
+      var rhx = sh.x + Math.cos(readyAng) * armLen;
+      var rhy = sh.y + Math.sin(readyAng) * armLen;
+      var rdx = rhx - sh.x, rdy = rhy - sh.y;
+      var rdl = Math.sqrt(rdx*rdx + rdy*rdy) || 1;
+      parryAttacker.hx = rhx;
+      parryAttacker.hy = rhy;
+      parryAttacker.tx = rhx + (rdx/rdl) * parryAttacker.sw.reach;
+      parryAttacker.ty = rhy + (rdy/rdl) * parryAttacker.sw.reach;
+    } else if(parryPhase === 'done'){
+      var pose2 = computeSlashPose(parryAttacker, PARRY_SLASH_COUNT - 1, 1);
+      parryAttacker.hx = pose2.hx;
+      parryAttacker.hy = pose2.hy;
+      parryAttacker.tx = pose2.tx;
+      parryAttacker.ty = pose2.ty;
+    }
+  }
+
+  function think(f, opp, now){
+    var df = f.df;
+    var dist = Math.abs(f.x - opp.x);
+    var myReach = totalReach(f.sw);
+    var predictX = opp.x + opp.vx * df.pred * 10;
+    var aim = Math.abs(f.x - predictX);
+
+    if(opp.swing > 0.3 && aim < myReach && f.cd <= 0 && f.stun <= 0){
+      if(Math.random() < 0.30){
+        startSwing(f, now);
+        return;
+      }
+    }
+
+    if(aim < myReach - 10 && f.cd <= 0 && f.stun <= 0 && Math.random() < df.aggr){
+      startSwing(f, now);
+      return;
+    }
+
+    if(f.onGround && Math.random() < df.jump * 0.25 && dist > myReach) f.qjump = true;
+
+    var ideal = myReach * 0.7;
+    if(dist > ideal + 20){
+      f.vx += f.dir * df.spd * 0.4;
+      if(Math.random() < 0.15){
+        f.vx += f.dir * df.spd * 0.5;
+        f.footJitter = (Math.random() * 2 - 1) * 4;
+      }
+    } else if(dist < ideal - 20){
+      if(Math.random() > df.aggr * 0.5) f.vx -= f.dir * df.spd * 0.35;
+    } else {
+      if(Math.random() < 0.4){
+        var hop = (Math.random() < 0.5 ? 1 : -1) * df.spd * 0.35;
+        f.vx += hop;
+      }
+    }
+  }
+
+  function stepFighter(f, opp, now, dt){
+    if(f.hp <= 0) return;
+    if(now - f.lthink >= f.df.react){ think(f, opp, now); f.lthink = now; }
+
+    f.cd = Math.max(0, f.cd - dt * 16.667);
+    f.stun = Math.max(0, f.stun - dt * 16.667);
+    f.flash = Math.max(0, f.flash - dt * 0.06);
+    f.bob += dt * 0.18;
+
+    var targetLean = Math.max(-1, Math.min(1, f.vx * f.dir * 0.35));
+    f.lean += (targetLean - f.lean) * 0.18 * dt;
+
+    if(f.qjump && f.onGround){ f.vy = JUMP; f.onGround = false; f.qjump = false; }
+    if(f.qdodge !== 0){ f.vx += f.qdodge * f.df.spd * 1.4; f.qdodge = 0; }
+
+    f.x += f.vx * dt;
+    f.vx *= 0.85;
+    f.vy += GRAV * dt;
+    f.y -= f.vy * dt;
+
+    if(f.y <= 0){ f.y = 0; f.vy = 0; f.onGround = true; }
+    if(f.x < 40)   { f.x = 40; f.vx = 0; }
+    if(f.x > W-40) { f.x = W-40; f.vx = 0; }
+
+    f.pHx = f.hx; f.pHy = f.hy; f.pTx = f.tx; f.pTy = f.ty;
+
+    if(f.swing > 0){
+      var prevSwing = f.swing;
+      f.swing = Math.max(0, f.swing - dt * 0.1155);
+
+      if(!f.lungeApplied && f.swing <= 0.75){
+        f.vx += f.dir * 5.5;
+        f.lungeApplied = true;
+      }
+
+      poseHand(f, dt);
+      updateTip(f);
+
+      if(!f.resolved && prevSwing <= 0.9 && prevSwing >= 0.15){
+        if(bladeHits(f, opp)){
+          if(Math.random() < opp.dodge){ dodgePop(opp, f.x); }
+          else {
+            damage(f, opp);
+            spark(f.tx, f.ty, f.sw.color, 14);
+          }
+          f.resolved = true;
+          f.swing = Math.min(f.swing, 0.2);
+        }
+      }
+
+      if(f.swing === 0 && prevSwing > 0){ f.vx -= f.dir * 2.2; }
+    } else {
+      poseHand(f, dt);
+      updateTip(f);
+    }
+  }
+
+  function step(now, dt){
+    if(f1.swing > 0.15 && f2.swing > 0.15){
+      var touch = bladesTouch(f1.hx, f1.hy, f1.tx, f1.ty, f2.hx, f2.hy, f2.tx, f2.ty);
+      if(touch){
+        startParry(now, touch);
+        return;
+      }
+    }
+
+    stepFighter(f1, f2, now, dt);
+    if(st !== FIGHT) return;
+    stepFighter(f2, f1, now, dt);
+    if(st !== FIGHT) return;
+
+    var gap = Math.abs(f1.x - f2.x);
+    if(gap < BW + 4){
+      var push = (BW + 4 - gap) / 2;
+      if(f1.x < f2.x){ f1.x -= push; f2.x += push; }
+      else           { f1.x += push; f2.x -= push; }
+    }
+    if(f1.x < f2.x){ f1.dir = 1; f2.dir = -1; }
+    else           { f1.dir = -1; f2.dir = 1; }
+
+    for(var i = texts.length - 1; i >= 0; i--){
+      var t = texts[i]; t.y += t.vy*dt; t.life -= dt*0.02;
+      if(t.life <= 0) texts.splice(i, 1);
+    }
+    for(var s = sparks.length - 1; s >= 0; s--){
+      var p = sparks[s]; p.x += p.vx*dt; p.y += p.vy*dt; p.vy += 0.25*dt; p.life -= dt*0.04;
+      if(p.life <= 0) sparks.splice(s, 1);
+    }
+  }
+
+  function drawFighter(f){
+    var body = f.flash > 0.5 ? '#fff' : f.ar.color;
+    var gy = GROUND - f.y;
+    var bobY = Math.sin(f.bob) * 1.5;
+    var bobX = Math.cos(f.bob * 0.7) * 1.2;
+    var leanX = f.lean * 5;
+
+    var sc = Math.max(0.3, 1 - f.y/200);
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.beginPath(); ctx.ellipse(f.x + bobX, GROUND + 2, 18*sc, 4*sc, 0, 0, Math.PI*2); ctx.fill();
+
+    var legSpread = Math.sin(f.bob * 1.6) * 3;
+    ctx.fillStyle = body;
+    ctx.fillRect(f.x - 8 + leanX * 0.5 - legSpread, gy - 20, 6, 20);
+    ctx.fillRect(f.x + 2 + leanX * 0.5 + legSpread, gy - 20, 6, 20);
+
+    ctx.fillStyle = body;
+    ctx.fillRect(f.x - BW/2 + leanX + bobX, gy - BH + bobY, BW, BH - 18);
+
+    var headX = f.x + leanX * 1.2 + bobX;
+    var headY = gy - BH - HR + bobY * 0.8;
+    ctx.beginPath();
+    ctx.fillStyle = body;
+    ctx.arc(headX, headY, HR, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle = f.col;
+    ctx.fillRect(headX + (f.dir > 0 ? 4 : -8), headY - 2, 4, 4);
+
+    var sh = shoulder(f);
+    var dx = f.hx - sh.x, dy = f.hy - sh.y;
+    var alen = Math.sqrt(dx*dx + dy*dy);
+    if(alen > 60){
+      f.hx = sh.x + dx*(60/alen); f.hy = sh.y + dy*(60/alen);
+      dx = f.hx - sh.x; dy = f.hy - sh.y;
+    }
+    var px = -dy, py = dx;
+    var pl = Math.sqrt(px*px + py*py) || 1;
+    var bend = f.swing > 0 ? 14 : 6;
+    var sgn = f.dir > 0 ? 1 : -1;
+    var ex = sh.x + dx*0.5 + (px/pl)*bend*-sgn;
+    var ey = sh.y + dy*0.5 + (py/pl)*bend*-sgn;
+
+    ctx.strokeStyle = body; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(sh.x, sh.y); ctx.lineTo(ex, ey); ctx.lineTo(f.hx, f.hy); ctx.stroke();
+
+    ctx.fillStyle = body;
+    ctx.beginPath(); ctx.arc(f.hx, f.hy, 4, 0, Math.PI*2); ctx.fill();
+
+    if(!f.disarmed){
+      var hasLegendary = (f.critMultiplier > 1 || f.dmgMultiplier > 1);
+      if(hasLegendary){
+        ctx.save();
+        ctx.shadowColor = f.critMultiplier >= 4 ? '#ff0000' : (f.dmgMultiplier >= 4 ? '#ff00ff' : '#ffcc33');
+        ctx.shadowBlur = 14;
+      }
+
+      ctx.strokeStyle = f.sw.color; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(f.hx, f.hy); ctx.lineTo(f.tx, f.ty); ctx.stroke();
+
+      var gdx = f.tx - f.hx, gdy = f.ty - f.hy;
+      var gl = Math.sqrt(gdx*gdx + gdy*gdy) || 1;
+      ctx.strokeStyle = '#444'; ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(f.hx - (-gdy/gl*6), f.hy - (gdx/gl*6));
+      ctx.lineTo(f.hx + (-gdy/gl*6), f.hy + (gdx/gl*6));
+      ctx.stroke();
+
+      if(hasLegendary) ctx.restore();
+    }
+
+    var w = 80, bh2 = 7;
+    var bx = f.x - w/2, by = gy - BH - HR - 30;
+    ctx.fillStyle = '#222'; ctx.fillRect(bx, by, w, bh2);
+    ctx.fillStyle = f.col; ctx.fillRect(bx, by, w*Math.max(0, f.hp/f.maxHp), bh2);
+    ctx.strokeStyle = '#555'; ctx.lineWidth = 1; ctx.strokeRect(bx, by, w, bh2);
+
+    ctx.font = '10px monospace'; ctx.fillStyle = '#888'; ctx.textAlign = 'center';
+    ctx.fillText(f.sw.n + ' / ' + f.ar.n + ' / ' + f.em.n, f.x, by - 6);
+    ctx.textAlign = 'left';
+  }
+
+  function drawArena(){
+    var sky = ctx.createLinearGradient(0, 0, 0, GROUND);
+    sky.addColorStop(0, '#0a0a14'); sky.addColorStop(1, '#141414');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, GROUND);
+    ctx.fillStyle = '#221a14'; ctx.fillRect(0, GROUND, W, H - GROUND);
+    ctx.strokeStyle = '#4a3a2a'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, GROUND); ctx.lineTo(W, GROUND); ctx.stroke();
+    ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 1;
+    for(var i = 100; i < W; i += 100){
+      ctx.beginPath(); ctx.moveTo(i, GROUND); ctx.lineTo(i, H); ctx.stroke();
+    }
+  }
+
+  function drawDisarmSword(s){
+    if(!s || s.life <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, s.life));
+    ctx.translate(s.x, s.y);
+    ctx.rotate(s.rot);
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-26, 0); ctx.lineTo(26, 0); ctx.stroke();
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(0, 7); ctx.stroke();
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  function drawFinalSlice(s){
+    if(!s) return;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, s.life));
+    ctx.translate(s.x, s.y);
+    ctx.rotate(s.angle);
+    ctx.shadowColor = '#ff3333';
+    ctx.shadowBlur = 22;
+    var grad = ctx.createLinearGradient(0, -120, 0, 120);
+    grad.addColorStop(0,   'rgba(255,80,80,0)');
+    grad.addColorStop(0.5, 'rgba(255,255,255,1)');
+    grad.addColorStop(1,   'rgba(255,80,80,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(-4, -120, 8, 240);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,1)';
+    ctx.fillRect(-1.5, -120, 3, 240);
+    ctx.fillStyle = '#ffee55';
+    for(var i = 0; i < 6; i++){
+      var yy = -100 + i * 40;
+      var size = 2 + Math.sin(i * 1.7) * 1.5;
+      ctx.fillRect(-size/2, yy, size, size);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  function drawHUD(){
+    var dodge1 = Math.round(f1.dodge * 100);
+    var dodge2 = Math.round(f2.dodge * 100);
+    var crit1 = totalCritMult(f1).toFixed(2) + 'x';
+    var crit2 = totalCritMult(f2).toFixed(2) + 'x';
+    var dmg1 = totalDmgMult(f1).toFixed(2) + 'x';
+    var dmg2 = totalDmgMult(f2).toFixed(2) + 'x';
+
+    var leg1 = (f1.critMultiplier > 1 || f1.dmgMultiplier > 1);
+    var leg2 = (f2.critMultiplier > 1 || f2.dmgMultiplier > 1);
+
+    ctx.font = '13px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#0f0';
+    ctx.fillText('GREEN: ' + f1.sw.n + ' / ' + f1.ar.n + ' / ' + f1.em.n + ' / ' + f1.df.n, 16, 22);
+    ctx.font = '11px monospace';
+    ctx.fillStyle = '#0a0';
+    ctx.fillText('HP ' + f1.hp + '/' + f1.maxHp + '   DR ' + f1.dr + '%' +
+                 '   Dodge ' + dodge1 + '%', 16, 38);
+    ctx.fillStyle = leg1 ? '#ffcc33' : '#4a4';
+    ctx.fillText('Dmg ' + dmg1 + '   Crit ' + crit1 +
+                 '   Lifesteal ' + Math.round(f1.steal * 100) + '%' +
+                 (leg1 ? '   ★LEGENDARY' : ''), 16, 54);
+
+    ctx.font = '13px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#f00';
+    ctx.fillText(f2.df.n + ' / ' + f2.em.n + ' / ' + f2.ar.n + ' / ' + f2.sw.n + ' :RED', W - 16, 22);
+    ctx.font = '11px monospace';
+    ctx.fillStyle = '#a00';
+    ctx.fillText('HP ' + f2.hp + '/' + f2.maxHp + '   DR ' + f2.dr + '%' +
+                 '   Dodge ' + dodge2 + '%', W - 16, 38);
+    ctx.fillStyle = leg2 ? '#ffcc33' : '#a44';
+    ctx.fillText('Dmg ' + dmg2 + '   Crit ' + crit2 +
+                 '   Lifesteal ' + Math.round(f2.steal * 100) + '%' +
+                 (leg2 ? '   ★LEGENDARY' : ''), W - 16, 54);
+
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(f1.score + ' - ' + f2.score, W/2, 22);
+    ctx.font = '10px monospace';
+    ctx.fillStyle = '#555';
+    ctx.fillText('first to ' + ROUNDS_TO_WIN, W/2, 38);
+
+    ctx.font = '11px monospace';
+    ctx.fillStyle = '#666';
+    ctx.fillText('ESC = back to hub', W/2, H - 12);
+    ctx.textAlign = 'left';
+  }
+
+  function drawFight(){
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    drawArena();
+
+    for(var i = 0; i < sparks.length; i++){
+      var p = sparks[i];
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+    }
+    ctx.globalAlpha = 1;
+
+    drawDisarmSword(parryDisarmSword);
+    drawFighter(f1);
+    drawFighter(f2);
+
+    if(parryFinalSlice) drawFinalSlice(parryFinalSlice);
+
+    for(var t = 0; t < texts.length; t++){
+      var ft = texts[t];
+      ctx.globalAlpha = Math.max(0, ft.life);
+      ctx.fillStyle = ft.color || '#ff5252';
+      ctx.font = (ft.big ? 'bold 20px' : 'bold 16px') + ' monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(ft.text, ft.x, ft.y);
+      ctx.textAlign = 'left';
+    }
+    ctx.globalAlpha = 1;
+
+    if(parryHitFlash > 0){
+      ctx.fillStyle = 'rgba(255,255,255,' + (parryHitFlash * 0.25) + ')';
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    drawHUD();
+  }
+
+  function drawWheel(alpha, angle){
+    if(alpha <= 0) return;
+    var cx = W/2, cy = H/2 + 10;
+    var radius = 110;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.shadowColor = '#ffee55';
+    ctx.shadowBlur = 24;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    var slices = 8;
+    var sliceAngle = Math.PI * 2 / slices;
+    for(var i = 0; i < slices; i++){
+      var a0 = i * sliceAngle;
+      var a1 = a0 + sliceAngle;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, radius, a0, a1);
+      ctx.closePath();
+      ctx.fillStyle = (i % 2 === 0) ? '#1e7d1e' : '#7d1e1e';
+      ctx.fill();
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI * 2);
+    ctx.fillStyle = '#1a1a1a'; ctx.fill();
+    ctx.strokeStyle = '#ffee55'; ctx.lineWidth = 3; ctx.stroke();
+    ctx.restore();
+    ctx.restore();
+
+    ctx.beginPath(); ctx.arc(cx, cy, radius + 4, 0, Math.PI * 2);
+    ctx.strokeStyle = '#ffee55'; ctx.lineWidth = 3; ctx.stroke();
+
+    ctx.fillStyle = '#ffee55';
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - radius + 8);
+    ctx.lineTo(cx - 16, cy - radius - 32);
+    ctx.lineTo(cx + 16, cy - radius - 32);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 34px monospace';
+    ctx.fillStyle = '#ffee55';
+    ctx.fillText('PARRY!', W/2, cy - radius - 60);
+
+    ctx.font = '13px monospace';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('blades crossed — fate decides the hit', W/2, cy - radius - 40);
+
+    var spinning = (parryPhase === 'spin');
+    if(!spinning){
+      var winnerTxt = (parryWinner === 1) ? 'GREEN STRIKES' : 'RED STRIKES';
+      var winnerCol = (parryWinner === 1) ? '#0f0' : '#f00';
+      ctx.font = 'bold 26px monospace';
+      ctx.fillStyle = winnerCol;
+      ctx.fillText(winnerTxt, W/2, cy + radius + 60);
+    } else {
+      ctx.font = '14px monospace';
+      ctx.fillStyle = '#666';
+      ctx.fillText('spinning...', W/2, cy + radius + 60);
+    }
+
+    ctx.restore();
+    ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
+  }
+
+  function drawParryComboHUD(){
+    if(!parryAttacker || !parryLoser) return;
+
+    var shown = 0;
+    if(parryPhase === 'slash') shown = parrySlashIdx;
+    else if(parryPhase === 'done') shown = PARRY_SLASH_COUNT;
+
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 28px monospace';
+    ctx.fillStyle = '#ffee55';
+    ctx.fillText('COMBO  ' + shown + ' / ' + PARRY_SLASH_COUNT, W/2, 100);
+
+    var markW = 32;
+    var totalW = markW * PARRY_SLASH_COUNT;
+    var startX = W/2 - totalW/2;
+    for(var i = 0; i < PARRY_SLASH_COUNT; i++){
+      var mx = startX + i * markW + markW/2;
+      var my = 128;
+      var isFinal = (i === PARRY_SLASH_COUNT - 1);
+      if(i < shown){
+        if(parrySlashDodged[i]){
+          ctx.strokeStyle = '#66ccff';
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(mx, my, 9, 0, Math.PI * 2); ctx.stroke();
+          ctx.fillStyle = '#66ccff';
+          ctx.font = 'bold 12px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('D', mx, my + 4);
+        } else {
+          ctx.strokeStyle = isFinal ? '#ff3333' : '#ffcc33';
+          ctx.lineWidth = isFinal ? 4 : 3;
+          ctx.beginPath(); ctx.moveTo(mx - 10, my - 10); ctx.lineTo(mx + 10, my + 10); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(mx + 10, my - 10); ctx.lineTo(mx - 10, my + 10); ctx.stroke();
+        }
+      } else {
+        ctx.strokeStyle = isFinal ? '#441111' : '#333';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(mx, my, isFinal ? 10 : 8, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+
+    if(parryTotalDealt > 0 || parryPhase === 'done'){
+      var total = parryTotalDealt;
+      var done = (parryPhase === 'done');
+      ctx.font = 'bold 26px monospace';
+      ctx.fillStyle = done ? '#66ff88' : '#ff9933';
+      var totalStr = (done ? 'TOTAL  ' : 'DMG  ') + total;
+      ctx.fillText(totalStr, W/2, 176);
+
+      if(done){
+        ctx.font = '12px monospace';
+        ctx.fillStyle = '#888';
+        ctx.fillText('parry complete', W/2, 198);
+      }
+    }
+
+    var listY = 240;
+    ctx.textAlign = 'left';
+    ctx.font = '12px monospace';
+    var listX = parryLoser.x < W/2 ? W/2 - 300 : W/2 + 220;
+    ctx.fillStyle = '#888';
+    ctx.fillText('SLASH LOG', listX, listY - 14);
+    for(var j = 0; j < PARRY_SLASH_COUNT; j++){
+      var rowY = listY + j * 18;
+      var isFin = (j === PARRY_SLASH_COUNT - 1);
+      if(parrySlashHit[j]){
+        if(parrySlashDodged[j]){
+          ctx.fillStyle = '#66ccff';
+          ctx.fillText((isFin ? 'FINAL   ' : 'SLASH ' + (j + 1) + '   ') + 'DODGE', listX, rowY);
+        } else {
+          var d = parrySlashActual[j] || 0;
+          ctx.fillStyle = isFin ? '#ff3333' : '#ffcc33';
+          var label = isFin ? ('FINAL   -' + d) : ('SLASH ' + (j + 1) + '   -' + d);
+          ctx.fillText(label, listX, rowY);
+        }
+      } else if(j === parrySlashIdx && parryPhase === 'slash'){
+        ctx.fillStyle = '#666';
+        ctx.fillText('SLASH ' + (j + 1) + '   ...', listX, rowY);
+      } else {
+        ctx.fillStyle = '#333';
+        ctx.fillText('SLASH ' + (j + 1) + '   --', listX, rowY);
+      }
+    }
+
+    ctx.textAlign = 'left';
+  }
+
+  function currentUpgradeValue(f, name){
+    if(name === 'VAMPIRIC') return Math.round(f.steal * 100) + '%';
+    if(name === 'EVASIVE')  return Math.round(f.dodge * 100) + '%';
+    if(name === 'BRUTAL')   return '+' + Math.round(f.dmgBonus * 100) + '%';
+    if(name === 'ARMORED')  return f.dr + '%';
+    if(name === 'VITALITY') return 'HP ' + f.maxHp;
+    if(name === 'ONE HIT MASTER') return 'x' + f.critMultiplier;
+    if(name === 'ONE HIT DEAD')   return 'x' + f.dmgMultiplier;
+    return '--';
+  }
+
+  function drawCardOverlay(){
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillRect(0, 0, W, H);
+    var loserName = (cardLoser === f1) ? 'GREEN' : 'RED';
+    var loserColor = (cardLoser === f1) ? '#0f0' : '#f00';
+
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 26px monospace';
+    ctx.fillStyle = loserColor;
+    ctx.fillText(loserName + ' LOST THE ROUND', W/2, 46);
+
+    ctx.font = '13px monospace';
+    ctx.fillStyle = '#888';
+    ctx.fillText('Pick an upgrade for ' + loserName, W/2, 72);
+
+    ctx.font = '12px monospace';
+    ctx.fillStyle = '#666';
+    ctx.fillText('score   GREEN ' + f1.score + '  —  RED ' + f2.score, W/2, 94);
+
+    var cardW = 200, cardH = 250, gap = 30;
+    var totalW = cardW * 3 + gap * 2;
+    var startX = (W - totalW) / 2;
+    var cardY = 120;
+
+    for(var i = 0; i < 3; i++){
+      var cx = startX + i * (cardW + gap);
+      var card = CARD_POOL[cardOptions[i]];
+      var isSel = (i === cardCursor);
+      var isLegendary = !!card.legendary;
+
+      if(isLegendary && isSel){
+        ctx.save();
+        ctx.shadowColor = card.color;
+        ctx.shadowBlur = 24;
+      }
+
+      ctx.fillStyle = isLegendary ? (isSel ? '#2a1010' : '#180808') : (isSel ? '#1c1c1c' : '#101010');
+      ctx.fillRect(cx, cardY, cardW, cardH);
+      ctx.strokeStyle = isSel ? card.color : '#333';
+      ctx.lineWidth = isSel ? 3 : 1;
+      ctx.strokeRect(cx + 0.5, cardY + 0.5, cardW - 1, cardH - 1);
+      ctx.fillStyle = card.color;
+      ctx.fillRect(cx, cardY, cardW, 6);
+
+      if(isLegendary){
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = card.color;
+        ctx.fillText('★ LEGENDARY ★', cx + cardW/2, cardY + 24);
+      }
+
+      if(isLegendary && isSel) ctx.restore();
+
+      ctx.font = 'bold 20px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = card.color;
+      ctx.fillText(card.n, cx + cardW/2, cardY + 62);
+
+      ctx.globalAlpha = 0.15;
+      ctx.fillStyle = card.color;
+      ctx.fillRect(cx + cardW/2 - 40, cardY + 90, 80, 80);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = card.color; ctx.lineWidth = 2;
+      ctx.strokeRect(cx + cardW/2 - 40, cardY + 90, 80, 80);
+
+      ctx.font = '15px monospace';
+      ctx.fillStyle = '#ddd';
+      ctx.fillText(card.desc, cx + cardW/2, cardY + 205);
+
+      ctx.font = '11px monospace';
+      ctx.fillStyle = '#555';
+      ctx.fillText('current: ' + currentUpgradeValue(cardLoser, card.n), cx + cardW/2, cardY + 228);
+    }
+
+    ctx.font = '13px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#888';
+    var hint = 'LEFT/RIGHT = move    ENTER = pick';
+    if(!cardRerolled) hint += '    R = reroll';
+    else hint += '    (reroll used)';
+    ctx.fillText(hint, W/2, H - 26);
+    ctx.textAlign = 'left';
+  }
+
+  function drawMatchOverOverlay(){
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 42px monospace';
+    ctx.fillStyle = winner === 1 ? '#0f0' : '#f00';
+    ctx.fillText((winner === 1 ? 'GREEN' : 'RED') + ' WINS THE MATCH', W/2, H/2 - 20);
+    ctx.font = '20px monospace';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('final score   ' + f1.score + ' — ' + f2.score, W/2, H/2 + 20);
+    ctx.font = '14px monospace';
+    ctx.fillStyle = '#777';
+    ctx.fillText('SPACE = rematch    C = change loadout    ESC = hub', W/2, H/2 + 70);
+    ctx.textAlign = 'left';
+  }
+
+  function drawSelect(){
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    var stage = STAGES[pickStage];
+    var items = stage.items;
+    var cur = selIdx[pickStage];
+    var isArmor  = (stage.items === ARMORS);
+    var isEmblem = (stage.items === EMBLEMS);
+
+    ctx.textAlign = 'center'; ctx.font = '22px monospace';
+    ctx.fillStyle = stage.col;
+    ctx.fillText('CHOOSE ' + stage.label, W/2, 40);
+
+    var startY = 90, lineH = 46;
+    for(var i = 0; i < items.length; i++){
+      var y = startY + i*lineH;
+      if(i === cur){
+        ctx.fillStyle = stage.col;
+        ctx.fillRect(W/2 - 320, y - 26, 640, 38);
+      }
+      ctx.fillStyle = (i === cur) ? '#000' : '#ccc';
+      ctx.font = '18px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(items[i].n, W/2 - 300, y);
+
+      if(isArmor){
+        ctx.font = '12px monospace';
+        ctx.fillStyle = (i === cur) ? '#111' : '#666';
+        ctx.textAlign = 'right';
+        var stat = 'HP ' + items[i].hp + '   DR ' + items[i].dr + '%' +
+                   '   Dodge ' + Math.round(items[i].adodge * 100) + '%';
+        ctx.fillText(stat, W/2 + 300, y);
+        ctx.textAlign = 'left';
+      } else if(isEmblem){
+        ctx.font = '12px monospace';
+        ctx.fillStyle = (i === cur) ? '#111' : '#666';
+        ctx.textAlign = 'right';
+        ctx.fillText(items[i].desc, W/2 + 300, y);
+        ctx.textAlign = 'left';
+      }
+    }
+
+    ctx.font = '12px monospace';
+    ctx.textAlign = 'center';
+    var summary = [];
+    if(pickStage > 3){
+      summary.push('G: ' + SWORDS[selIdx[0]].n + ' / ' + ARMORS[selIdx[1]].n + ' / ' + EMBLEMS[selIdx[2]].n + ' / ' + DIFFS[selIdx[3]].n);
+    }
+    if(pickStage > 7){
+      summary.push('R: ' + SWORDS[selIdx[4]].n + ' / ' + ARMORS[selIdx[5]].n + ' / ' + EMBLEMS[selIdx[6]].n + ' / ' + DIFFS[selIdx[7]].n);
+    }
+    if(summary.length){
+      ctx.fillStyle = '#444';
+      ctx.fillText(summary.join('   '), W/2, H - 50);
+    }
+    ctx.fillStyle = '#666';
+    ctx.fillText('UP/DOWN = move  |  ENTER = confirm  |  ESC = back', W/2, H - 25);
+    ctx.textAlign = 'left';
+  }
+
+  function key(e){
+    var k = e.key;
+    if(k === 'Escape' || k === 'Esc'){ window.location.href = 'index.html'; return; }
+
+    if(st === SEL){
+      var stage = STAGES[pickStage];
+      if(k === 'ArrowUp' || k === 'ArrowDown'){
+        var c = selIdx[pickStage];
+        c += (k === 'ArrowUp' ? -1 : 1);
+        if(c < 0) c = stage.items.length - 1;
+        if(c >= stage.items.length) c = 0;
+        selIdx[pickStage] = c;
+        e.preventDefault();
+      } else if(k === 'Enter'){
+        pickStage++;
+        if(pickStage >= 8){ initMatch(); pickStage = 0; }
+        e.preventDefault();
+      }
+      return;
+    }
+
+    if(st === CARD){
+      if(k === 'ArrowLeft'){ cardCursor = (cardCursor + 2) % 3; e.preventDefault(); }
+      else if(k === 'ArrowRight'){ cardCursor = (cardCursor + 1) % 3; e.preventDefault(); }
+      else if(k === 'r' || k === 'R'){ doReroll(); e.preventDefault(); }
+      else if(k === 'Enter' || k === ' '){ applyCard(); e.preventDefault(); }
+      return;
+    }
+
+    if(st === MATCH_OVER){
+      if(k === ' ' || k === 'Spacebar'){ initMatch(); e.preventDefault(); }
+      else if(k === 'c' || k === 'C'){ st = SEL; pickStage = 0; e.preventDefault(); }
+    }
+  }
+
+  var raf = null, last = 0;
+
+  function loop(now){
+    var dt = (now - last) / 16.667;
+    if(dt > 1.5) dt = 1.5;
+    if(dt < 0.1) dt = 0.1;
+    last = now;
+
+    if(st === SEL){
+      drawSelect();
+    } else {
+      if(st === FIGHT) step(now, dt);
+      if(st === PARRY){
+        stepParry(now);
+        updateParryPoses(now);
+      }
+      drawFight();
+
+      if(st === PARRY){
+        var wheelAlpha = 1;
+        var wheelAngle = 0;
+        var elapsed = now - parryPhaseStart;
+
+        if(parryPhase === 'spin'){
+          var t = Math.min(1, elapsed / PARRY_SPIN_MS);
+          var eased = 1 - Math.pow(1 - t, 3);
+          wheelAngle = parryAngleStart + (parryAngleEnd - parryAngleStart) * eased;
+        } else {
+          wheelAngle = parryAngleEnd;
+          if(parryPhase === 'land')       wheelAlpha = 1;
+          else if(parryPhase === 'disarm') wheelAlpha = Math.max(0, 1 - elapsed / PARRY_DISARM_MS);
+          else wheelAlpha = 0;
+        }
+
+        if(wheelAlpha > 0){
+          drawWheel(wheelAlpha, wheelAngle);
+        } else {
+          var dim = (parryPhase === 'slash' || parryPhase === 'done') ? 0.35 : 0;
+          if(dim > 0){
+            ctx.fillStyle = 'rgba(0,0,0,' + dim + ')';
+            ctx.fillRect(0, 0, W, H);
+          }
+        }
+
+        if(parryPhase === 'slash' || parryPhase === 'done'){
+          drawParryComboHUD();
+        }
+      }
+
+      if(st === CARD) drawCardOverlay();
+      if(st === MATCH_OVER) drawMatchOverOverlay();
+    }
+
+    raf = requestAnimationFrame(loop);
+  }
+
+  st = SEL; pickStage = 0;
+  selIdx = [1, 0, 0, 1, 1, 0, 0, 1];
+  winner = 0;
+  texts = []; sparks = [];
+  document.addEventListener('keydown', key, true);
+  last = performance.now();
+  raf = requestAnimationFrame(loop);
+})();
+</script>
+
+</body>
+</html>
