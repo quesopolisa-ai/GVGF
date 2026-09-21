@@ -4,37 +4,55 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GameHub</title>
-<link rel="stylesheet" href="style.css">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a; color: #ddd;
+    font-family: 'Courier New', monospace;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh;
+  }
+  header {
+    width: 100%; padding: 24px 0; text-align: center;
+    border-bottom: 1px solid #222; background: #0f0f0f;
+  }
+  h1 { font-size: 32px; letter-spacing: 6px; color: #0f0; text-shadow: 0 0 12px rgba(0,255,0,0.4); }
+  .subtitle { font-size: 12px; color: #555; margin-top: 6px; letter-spacing: 2px; }
+  #menu {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px; padding: 32px; width: 100%; max-width: 900px;
+  }
+  .card {
+    display: block; text-decoration: none;
+    background: #141414; border: 1px solid #222; border-radius: 6px;
+    padding: 20px; cursor: pointer; transition: all 0.15s ease;
+  }
+  .card:hover { border-color: #0f0; background: #181818; transform: translateY(-2px); }
+  .card h2 { font-size: 18px; color: #0f0; margin-bottom: 8px; letter-spacing: 2px; }
+  .card p { font-size: 12px; color: #777; line-height: 1.5; }
+  .card.locked { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+  .card.locked:hover { border-color: #222; background: #141414; transform: none; }
+</style>
 </head>
 <body>
 
-<div id="menuView">
-  <header>
-    <h1>GAMEHUB</h1>
-    <div class="subtitle">select a game</div>
-  </header>
-  <div id="menu">
-    <div class="card" data-game="pong">
-      <h2>PONG BOT PREDICTOR</h2>
-      <p>Auto-playing pong. Six AI difficulties. Watch bots predict the ball.</p>
-    </div>
-    <div class="card" data-game="sword">
-      <h2>BOT SWORD FIGHT</h2>
-      <p>Two bots duel. Pick sword, armor, and difficulty. They fight for real.</p>
-    </div>
-    <div class="card locked"><h2>SOON</h2><p>Slot reserved.</p></div>
-    <div class="card locked"><h2>SOON</h2><p>Slot reserved.</p></div>
-  </div>
-</div>
+<header>
+  <h1>GAMEHUB</h1>
+  <div class="subtitle">select a game</div>
+</header>
 
-<div id="gameView">
-  <button id="backBtn">&larr; BACK</button>
-  <canvas id="gameCanvas" width="800" height="500"></canvas>
+<div id="menu">
+  <a class="card" href="pong.html">
+    <h2>PONG BOT PREDICTOR</h2>
+    <p>Auto-playing pong. Six AI difficulties. Watch bots predict the ball.</p>
+  </a>
+  <a class="card" href="sword.html">
+    <h2>BOT SWORD FIGHT</h2>
+    <p>Two bots duel. Pick sword, armor, emblem, and difficulty. Parry combos, legendary cards, first to 11.</p>
+  </a>
+  <div class="card locked"><h2>SOON</h2><p>Slot reserved.</p></div>
+  <div class="card locked"><h2>SOON</h2><p>Slot reserved.</p></div>
 </div>
-
-<script src="pong.js"></script>
-<script src="sword.js"></script>
-<script src="main.js"></script>
 
 </body>
 </html>
