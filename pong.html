@@ -1,4 +1,39 @@
-window.Pong = function(canvas, ctx, W, H){
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GameHub — Pong</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh;
+    font-family: 'Courier New', monospace;
+  }
+  #backBtn {
+    position: fixed; top: 16px; left: 16px;
+    background: #141414; border: 1px solid #333; color: #aaa;
+    padding: 8px 16px; font-family: inherit; font-size: 12px;
+    letter-spacing: 2px; cursor: pointer; z-index: 10;
+    text-decoration: none;
+  }
+  #backBtn:hover { color: #0f0; border-color: #0f0; }
+  canvas { background: #000; max-width: 100vw; max-height: 100vh; }
+</style>
+</head>
+<body>
+
+<a id="backBtn" href="index.html">&larr; BACK</a>
+<canvas id="gameCanvas" width="800" height="500"></canvas>
+
+<script>
+(function(){
+  var canvas = document.getElementById('gameCanvas');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
   var pw = 12, ph = 90;
   var BASE = 6.1, MAXSPD = 500, HMULT = 1.2, RANGE = 0.5;
   var BARMAX = 10, MTRMAX = 520, WIN = 11;
@@ -185,7 +220,7 @@ window.Pong = function(canvas, ctx, W, H){
       ctx.fillText(DIFFS[i].n, W/2, y);
     }
     ctx.fillStyle = '#666'; ctx.font = '14px monospace';
-    ctx.fillText('UP/DOWN = move  |  ENTER = select  |  ESC = menu', W/2, H - 25);
+    ctx.fillText('UP/DOWN = move  |  ENTER = select  |  ESC = back', W/2, H - 25);
     ctx.textAlign = 'left';
   }
 
@@ -218,7 +253,7 @@ window.Pong = function(canvas, ctx, W, H){
     ctx.fillText(DIFFS[pk2].n, W/2 + 160, H - 20);
     ctx.textAlign = 'center';
     ctx.fillStyle = '#666';
-    ctx.fillText('first to ' + WIN + '  |  ESC = menu', W/2, H - 20);
+    ctx.fillText('first to ' + WIN + '  |  ESC = back', W/2, H - 20);
     ctx.textAlign = 'left';
 
     if(over){
@@ -227,7 +262,7 @@ window.Pong = function(canvas, ctx, W, H){
       ctx.fillStyle = winner === 1 ? '#0f0' : '#f00';
       ctx.fillText((winner === 1 ? 'GREEN' : 'RED') + ' WINS', W/2, H/2 - 10);
       ctx.font = '16px monospace'; ctx.fillStyle = '#aaa';
-      ctx.fillText('SPACE = rematch  |  C = change bots  |  ESC = menu', W/2, H/2 + 30);
+      ctx.fillText('SPACE = rematch  |  C = change bots  |  ESC = back', W/2, H/2 + 30);
       ctx.textAlign = 'left';
     }
   }
@@ -239,7 +274,7 @@ window.Pong = function(canvas, ctx, W, H){
 
   function key(e){
     var k = e.key;
-    if(k === 'Escape' || k === 'Esc'){ stop(); return; }
+    if(k === 'Escape' || k === 'Esc'){ window.location.href = 'index.html'; return; }
 
     if(st === S1 || st === S2){
       if(k === 'ArrowUp' || k === 'ArrowDown'){
@@ -279,20 +314,13 @@ window.Pong = function(canvas, ctx, W, H){
     raf = requestAnimationFrame(loop);
   }
 
-  function start(){
-    init();
-    st = S1; sl1 = 1; sl2 = 1; pk1 = 1; pk2 = 1;
-    document.removeEventListener('keydown', key, true);
-    document.addEventListener('keydown', key, true);
-    last = performance.now();
-    if(raf) cancelAnimationFrame(raf);
-    raf = requestAnimationFrame(loop);
-  }
+  init();
+  st = S1; sl1 = 1; sl2 = 1; pk1 = 1; pk2 = 1;
+  document.addEventListener('keydown', key, true);
+  last = performance.now();
+  raf = requestAnimationFrame(loop);
+})();
+</script>
 
-  function stop(){
-    if(raf){ cancelAnimationFrame(raf); raf = null; }
-    document.removeEventListener('keydown', key, true);
-  }
-
-  return { start: start, stop: stop };
-};
+</body>
+</html>
